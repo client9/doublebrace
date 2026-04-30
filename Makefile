@@ -10,6 +10,12 @@ cover: ## generate code coverage report
 	go test -run='^Test' -coverprofile=cover.out -coverpkg=.
 	go tool cover -func=cover.out
 
+version: ## print OS, Go, and golangci versions
+	@echo $$0
+	@uname -a
+	@go version
+	@golangci-lint --version
+
 ## NOTE: this downloads it's schema over the network
 lintverify:
 	golangci-lint config verify
