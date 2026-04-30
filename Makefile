@@ -24,6 +24,9 @@ lint: ## lint and verify repo is already formatted
 	test -z "$$(gofmt -l *.go)"
 	golangci-lint run .
 
+build: ## build
+	go build ./...
+
 test: ## test
 	go test ./...
 
