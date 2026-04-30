@@ -258,10 +258,7 @@ func Take(v any, n int) (any, error) {
 			return string(r[:n]), nil
 		}
 		// negative: last |n| runes
-		start := len(r) + n
-		if start < 0 {
-			start = 0
-		}
+		start := max(len(r)+n, 0)
 		return string(r[start:]), nil
 	}
 	elems, err := toSlice(v)
@@ -275,10 +272,7 @@ func Take(v any, n int) (any, error) {
 		return elems[:n], nil
 	}
 	// negative: last |n| elements
-	start := len(elems) + n
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(elems)+n, 0)
 	return elems[start:], nil
 }
 
@@ -301,10 +295,7 @@ func Drop(v any, n int) (any, error) {
 			return string(r[n:]), nil
 		}
 		// negative: remove last |n| runes
-		end := len(r) + n
-		if end < 0 {
-			end = 0
-		}
+		end := max(len(r)+n, 0)
 		return string(r[:end]), nil
 	}
 	elems, err := toSlice(v)
@@ -318,10 +309,7 @@ func Drop(v any, n int) (any, error) {
 		return elems[n:], nil
 	}
 	// negative: remove last |n| elements
-	end := len(elems) + n
-	if end < 0 {
-		end = 0
-	}
+	end := max(len(elems)+n, 0)
 	return elems[:end], nil
 }
 
