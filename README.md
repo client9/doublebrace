@@ -2,7 +2,13 @@
 
 The default functions in `text/template` and `html/template` are minimal. This extends them.
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/client9/doublebrace.svg)](https://pkg.go.dev/github.com/client9/doublebrace)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Build Status](https://github.com/client9/doublebrace/actions/workflows/go.yml/badge.svg)](https://github.com/client9/doublebrace/actions)
+
 ## Quick Start
+
+Requires Go >= 1.23.
 
 ```go
 import (
