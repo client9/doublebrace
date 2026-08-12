@@ -8,6 +8,10 @@ linters:
     # pkg.go.dev: see Replace, whose replacement argument is repl for this reason
     # even though strings.Replace names it new.
     - predeclared
+    # Flags fmt.Errorf with no formatting verbs, which is errors.New spelled at
+    # the cost of a parse. Keeps the errors.New sweep from regressing one call
+    # at a time.
+    - perfsprint
   exclusions:
     generated: lax
     presets:
