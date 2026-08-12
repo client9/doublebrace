@@ -330,11 +330,11 @@ func Drop(v any, n int) (any, error) {
 //
 //	reverse []int{1, 2, 3} → []any{3, 2, 1}
 func Reverse(v any) (any, error) {
-	elems, err := toSlice(v)
+	out, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("reverse: %w", err)
 	}
-	out := slices.Clone(elems)
+	// toSlice already allocated; reversing it in place does not touch the input.
 	slices.Reverse(out)
 	return out, nil
 }
@@ -415,11 +415,11 @@ func inferSortMode(elems []any) sortMode {
 //	sort (list 10 2 30)                   → [2 10 30]
 //	sort $pages "Title"                   → pages A→Z by Title field
 func Sort(v any, key ...string) (any, error) {
-	elems, err := toSlice(v)
+	// toSlice already allocated, so out can be sorted in place.
+	out, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("sort: %w", err)
 	}
-	out := slices.Clone(elems)
 	if len(key) > 0 {
 		k := key[0]
 		// Extract the sort keys up front rather than inside the comparator.
@@ -482,11 +482,11 @@ func Sort(v any, key ...string) (any, error) {
 //	sortNum (list "10" "9" "2") → ["2" "9" "10"]
 //	sortNum $pages "Year"       → pages sorted by Year field, ascending
 func SortNum(v any, key ...string) (any, error) {
-	elems, err := toSlice(v)
+	// toSlice already allocated, so out can be sorted in place.
+	out, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("sortNum: %w", err)
 	}
-	out := slices.Clone(elems)
 	var sortErr error
 	if len(key) > 0 {
 		k := key[0]
@@ -610,12 +610,21 @@ func In(v, val any) (bool, error) {
 		}
 		return strings.Contains(rv.String(), s), nil
 	case reflect.Slice:
-		elems, err := toSlice(v)
-		if err != nil {
-			return false, err
+		// Iterate rather than going through toSlice: this is a read-only search
+		// that returns a bool, so there is no result to keep unaliased and no
+		// reason to copy the whole slice to find one element. (The rule against
+		// non-copying fast paths applies to toSlice, which must protect the
+		// structures it hands back; nothing escapes from here.)
+		if s, ok := v.([]any); ok {
+			for _, elem := range s {
+				if reflect.DeepEqual(elem, val) {
+					return true, nil
+				}
+			}
+			return false, nil
 		}
-		for _, elem := range elems {
-			if reflect.DeepEqual(elem, val) {
+		for i := range rv.Len() {
+			if reflect.DeepEqual(rv.Index(i).Interface(), val) {
 				return true, nil
 			}
 		}
