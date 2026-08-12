@@ -5,6 +5,11 @@
 // argument. This matches direct Go calls and avoids pipeline-optimized argument
 // order confusion. Single-argument functions work naturally in pipelines regardless.
 //
+// No function returns nil on success: a function that produces nothing returns
+// an empty slice or map. Templates cannot tell the two apart — range, len, and
+// index treat them identically — but encoding/json can, so a nil result would
+// make jsonify emit null where a consuming script expects [].
+//
 // # Usage
 //
 //	import "github.com/client9/doublebrace"

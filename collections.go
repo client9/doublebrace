@@ -43,15 +43,26 @@ func collectionsFuncMap() template.FuncMap {
 // --- internal helpers ---
 
 // toSlice converts any slice type to []any. []any is cloned; other slice types
-// are expanded via reflection.
+// are expanded via reflection. The result is never nil, only ever empty, so that
+// every function built on it inherits that guarantee — see the note on empty
+// results below.
 //
 // The clone is deliberate and load-bearing: collection functions must never
 // mutate or alias their inputs (see the package doc on concurrent template
 // execution), and allocating here is what makes that guarantee hold for every
 // caller rather than depending on each one to remember. The copy is shallow —
 // elements are shared, only the spine is fresh.
+//
+// Returning an empty slice rather than nil is likewise load-bearing. Templates
+// cannot tell the two apart (range, len, and index treat them identically), but
+// encoding/json can: jsonify on a nil slice emits null instead of [], which
+// breaks any script consuming the embedded value.
 func toSlice(v any) ([]any, error) {
 	if s, ok := v.([]any); ok {
+		if s == nil {
+			// slices.Clone(nil) is nil; see the non-nil invariant above.
+			return []any{}, nil
+		}
 		return slices.Clone(s), nil
 	}
 	rv := reflect.ValueOf(v)
@@ -351,17 +362,36 @@ func Compact(v any) (any, error) {
 	return slices.CompactFunc(elems, reflect.DeepEqual), nil
 }
 
-// Concat concatenates multiple slices into a single []any.
+// Concat concatenates multiple slices into a single []any. The result is always
+// non-nil, so concat with no arguments yields an empty slice rather than nil,
+// matching list.
 //
 //	concat (list 1 2) (list 3 4) → []any{1, 2, 3, 4}
+//	concat                       → []any{}
 func Concat(ins ...any) ([]any, error) {
-	var out []any
+	// Validate and measure every argument before allocating, so that a bad
+	// argument fails without having built anything and out can be sized exactly.
+	total := 0
 	for i, v := range ins {
-		elems, err := toSlice(v)
-		if err != nil {
-			return nil, fmt.Errorf("concat: argument %d: %w", i, err)
+		rv := reflect.ValueOf(v)
+		if !rv.IsValid() || rv.Kind() != reflect.Slice {
+			return nil, fmt.Errorf("concat: argument %d: expected slice, got %T", i, v)
 		}
-		out = append(out, elems...)
+		total += rv.Len()
+	}
+	// Copy in directly rather than through toSlice, whose per-argument copy
+	// would only be copied again into out. out is freshly allocated here, so
+	// nothing aliases the arguments.
+	out := make([]any, 0, total)
+	for _, v := range ins {
+		if s, ok := v.([]any); ok {
+			out = append(out, s...)
+			continue
+		}
+		rv := reflect.ValueOf(v)
+		for i := range rv.Len() {
+			out = append(out, rv.Index(i).Interface())
+		}
 	}
 	return out, nil
 }
@@ -548,6 +578,11 @@ func Keys(v any) ([]string, error) {
 	m, ok := v.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("keys: expected map[string]any, got %T", v)
+	}
+	if len(m) == 0 {
+		// slices.Sorted collects into a nil slice, so an empty map would yield
+		// nil rather than an empty slice.
+		return []string{}, nil
 	}
 	return slices.Sorted(maps.Keys(m)), nil
 }

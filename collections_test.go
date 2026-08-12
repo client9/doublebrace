@@ -2,6 +2,7 @@ package doublebrace
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -216,14 +217,69 @@ func TestConcat(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	// zero args → empty
-	empty, err := Concat()
-	if err != nil || empty != nil {
-		t.Errorf("Concat() should return nil, nil; got %v, %v", empty, err)
-	}
 	// error on non-slice
 	if _, err := Concat("not a slice"); err == nil {
 		t.Error("expected error for non-slice argument")
+	}
+}
+
+// Concat must return an empty slice rather than nil, so that its result behaves
+// like every other collection result — and like list — for callers that check
+// for nil or append to it.
+func TestConcat_alwaysNonNil(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []any
+	}{
+		{"no arguments", nil},
+		{"one empty slice", []any{[]any{}}},
+		{"several empty slices", []any{[]any{}, []int{}, []string{}}},
+	}
+	for _, c := range cases {
+		got, err := Concat(c.in...)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if got == nil {
+			t.Errorf("%s: Concat returned nil, want empty non-nil slice", c.name)
+		}
+		if len(got) != 0 {
+			t.Errorf("%s: Concat = %v, want empty", c.name, got)
+		}
+	}
+}
+
+func TestConcat_mixedSliceTypes(t *testing.T) {
+	got, err := Concat([]int{1, 2}, []string{"a"}, []any{true, nil}, Titles{"t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []any{1, 2, "a", true, nil, "t"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestConcat_errorNamesArgumentPosition(t *testing.T) {
+	_, err := Concat([]int{1}, "not a slice")
+	if err == nil {
+		t.Fatal("expected error for non-slice argument")
+	}
+	if !strings.Contains(err.Error(), "argument 1") {
+		t.Errorf("error should name the offending argument position, got: %v", err)
+	}
+}
+
+// Concat sizes the result from the summed argument lengths in one allocation
+// rather than growing it by repeated append. This pins that.
+func TestConcat_resultIsExactlySized(t *testing.T) {
+	got, err := Concat([]any{1, 2}, []any{3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != cap(got) {
+		t.Errorf("len=%d cap=%d, want equal", len(got), cap(got))
 	}
 }
 
@@ -542,6 +598,100 @@ func TestIn_mapKeyTypes(t *testing.T) {
 			t.Errorf("%s: expected an error, got %v", c.name, ok)
 		}
 	}
+}
+
+// No function returns nil for a successful call: an empty result is an empty
+// slice or map. Templates cannot distinguish the two — range, len, and index
+// treat them identically — but encoding/json can, so a nil result makes jsonify
+// emit null where a script expects []. The enforcement points are toSlice, which
+// every slice-taking function goes through, and Keys, which does not; the rest
+// hold the rule by construction and are pinned here so they keep holding it.
+func TestFunctionsReturnEmptyNotNil(t *testing.T) {
+	isNilResult := func(v any) bool {
+		rv := reflect.ValueOf(v)
+		if !rv.IsValid() {
+			return true
+		}
+		switch rv.Kind() {
+		case reflect.Slice, reflect.Map:
+			return rv.IsNil()
+		}
+		return false
+	}
+	// Every slice-taking function, against both an empty and a nil slice. Reusing
+	// immutableCases means a function added there is checked here too.
+	t.Run("slice input", func(t *testing.T) {
+		for _, tc := range immutableCases {
+			for _, in := range []struct {
+				kind  string
+				slice []any
+			}{{"empty", []any{}}, {"nil", nil}} {
+				got, err := tc.fn(in.slice)
+				if err != nil {
+					continue // First and Last legitimately reject empty input
+				}
+				if isNilResult(got) {
+					t.Errorf("%s(%s slice) returned a nil slice, want empty", tc.name, in.kind)
+				}
+			}
+		}
+	})
+
+	// Everything else that can produce an empty result: functions that do not
+	// take a slice, the map constructors, and the string functions registered
+	// straight from the stdlib.
+	t.Run("other functions", func(t *testing.T) {
+		cases := []struct {
+			name string
+			fn   func() (any, error)
+		}{
+			{"List", func() (any, error) { return List(), nil }},
+			{"Seq n<1", func() (any, error) { return Seq(0) }},
+			{"Seq start>end", func() (any, error) { return Seq(5, 1) }},
+			{"Seq empty range with step", func() (any, error) { return Seq(5, 1, 1) }},
+			{"Concat no args", func() (any, error) { return Concat() }},
+			{"Keys empty map", func() (any, error) { return Keys(map[string]any{}) }},
+			{"Values empty map", func() (any, error) { return Values(map[string]any{}) }},
+			{"Dict no args", func() (any, error) { return Dict() }},
+			{"MergeMaps no args", func() (any, error) { return MergeMaps() }},
+			{"MergeMaps empty maps", func() (any, error) { return MergeMaps(map[string]any{}) }},
+			// split and fields are registered as strings.Split and strings.Fields.
+			// They satisfy the rule today; these pin it so that swapping in a
+			// custom implementation cannot quietly break it.
+			{"split empty string", func() (any, error) { return strings.Split("", ""), nil }},
+			{"split empty on sep", func() (any, error) { return strings.Split("", ","), nil }},
+			{"fields empty string", func() (any, error) { return strings.Fields(""), nil }},
+			{"fields all whitespace", func() (any, error) { return strings.Fields("   "), nil }},
+		}
+		for _, c := range cases {
+			got, err := c.fn()
+			if err != nil {
+				t.Errorf("%s: unexpected error: %v", c.name, err)
+				continue
+			}
+			if isNilResult(got) {
+				t.Errorf("%s returned nil, want an empty slice or map", c.name)
+			}
+		}
+	})
+
+	// The symptom this invariant exists to prevent.
+	t.Run("jsonify emits an empty array", func(t *testing.T) {
+		ks, err := Keys(map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j, _ := Jsonify(ks); j != "[]" {
+			t.Errorf("jsonify (keys $empty) = %s, want []", j)
+		}
+		sorted, err := Sort([]any(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j, _ := Jsonify(sorted); j != "[]" {
+			t.Errorf("jsonify (sort $nil) = %s, want []", j)
+		}
+	})
 }
 
 func TestDefault(t *testing.T) {
