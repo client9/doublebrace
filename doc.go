@@ -62,8 +62,8 @@
 //   - floor(a) float64 — greatest integer value ≤ a
 //   - round(a) float64 — nearest integer, rounding half away from zero
 //   - pow(base, exp) float64 — base raised to exp
-//   - min(args...) float64 — minimum value; accepts scalars, slices, or a mix
-//   - max(args...) float64 — maximum value; accepts scalars, slices, or a mix
+//   - min(args...) float64 — minimum value; accepts scalars, slices, arrays, or a mix
+//   - max(args...) float64 — maximum value; accepts scalars, slices, arrays, or a mix
 //   - clamp(val, min, max) float64 — constrain val to [min, max]
 //
 // # Encoding

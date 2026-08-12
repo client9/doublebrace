@@ -229,6 +229,43 @@ func TestClamp(t *testing.T) {
 	}
 }
 
+// min and max accept the same sequence kinds the collection functions do, so an
+// array reaches them like a slice does. flattenNumbers shares isSequence with
+// toSlice to keep the two surfaces from drifting apart.
+func TestMinMax_arrays(t *testing.T) {
+	cases := []struct {
+		name string
+		fn   func(...any) (float64, error)
+		args []any
+		want float64
+	}{
+		{"min/array", Min, []any{[3]int{5, 2, 8}}, 2},
+		{"max/array", Max, []any{[3]int{5, 2, 8}}, 8},
+		{"min/array of floats", Min, []any{[2]float64{1.5, 0.5}}, 0.5},
+		{"min/array with scalars", Min, []any{[2]int{5, 2}, 1, 9}, 1},
+		{"max/array and slice", Max, []any{[2]int{5, 2}, []int{9, 1}}, 9},
+		{"min/array nested in slice", Min, []any{[]any{[2]int{10, 3}, 7}}, 3},
+		{"max/array nested in array", Max, []any{[2]any{[2]int{10, 3}, 7}}, 10},
+		{"min/array of numeric strings", Min, []any{[2]string{"10", "2"}}, 2},
+		{"min/single-element array", Min, []any{[1]int{42}}, 42},
+	}
+	for _, c := range cases {
+		got, err := c.fn(c.args...)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s(%v) = %v, want %v", c.name, c.args, got, c.want)
+		}
+	}
+
+	// An empty array contributes no values, so it is the no-arguments case.
+	if _, err := Min([0]int{}); err == nil {
+		t.Error("Min([0]int{}): expected error for an empty sequence")
+	}
+}
+
 func TestMinMax_errors(t *testing.T) {
 	if _, err := Min(); err == nil {
 		t.Error("Min(): expected error for no args")

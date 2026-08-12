@@ -160,13 +160,17 @@ func ModBool(a, b any) (bool, error) {
 	return math.Mod(x, y) == 0, nil
 }
 
-// flattenNumbers recursively flattens args, expanding any slice values, and
-// converts each element to float64. Nested slices are fully unwound.
+// flattenNumbers recursively flattens args, expanding any slice or array values,
+// and converts each element to float64. Nesting is fully unwound.
+//
+// isSequence lives in collections.go but is the package-wide definition of an
+// indexable sequence; using it here is what keeps min and max accepting the same
+// inputs the collection functions do.
 func flattenNumbers(args []any) ([]float64, error) {
 	var out []float64
 	for _, arg := range args {
 		v := reflect.ValueOf(arg)
-		if v.IsValid() && v.Kind() == reflect.Slice {
+		if v.IsValid() && isSequence(v.Kind()) {
 			for i := range v.Len() {
 				sub, err := flattenNumbers([]any{v.Index(i).Interface()})
 				if err != nil {
@@ -186,11 +190,13 @@ func flattenNumbers(args []any) ([]float64, error) {
 }
 
 // Min returns the smallest value among the given numbers.
-// Accepts one or more scalars, slices, or a mix; slices are flattened recursively.
+// Accepts one or more scalars, slices, arrays, or a mix; sequences are flattened
+// recursively.
 //
 //	Min(3, 1, 2)              → 1
 //	Min([]int{5, 2, 8})       → 2
 //	Min([]int{5, 2}, 1, 9)    → 1
+//	Min([3]int{5, 2, 8})      → 2
 func Min(args ...any) (float64, error) {
 	vals, err := flattenNumbers(args)
 	if err != nil {
@@ -209,11 +215,13 @@ func Min(args ...any) (float64, error) {
 }
 
 // Max returns the largest value among the given numbers.
-// Accepts one or more scalars, slices, or a mix; slices are flattened recursively.
+// Accepts one or more scalars, slices, arrays, or a mix; sequences are flattened
+// recursively.
 //
 //	Max(3, 1, 2)              → 3
 //	Max([]int{5, 2, 8})       → 8
 //	Max([]int{5, 2}, 9, 1)    → 9
+//	Max([3]int{5, 2, 8})      → 8
 func Max(args ...any) (float64, error) {
 	vals, err := flattenNumbers(args)
 	if err != nil {
