@@ -42,8 +42,18 @@ func collectionsFuncMap() template.FuncMap {
 
 // --- internal helpers ---
 
-// toSlice converts any slice type to []any. []any is cloned; other slice types
-// are expanded via reflection. The result is never nil, only ever empty, so that
+// isSequence reports whether k is an indexable sequence of elements. Arrays are
+// accepted alongside slices: reflect indexes them identically, and template data
+// carrying a fixed-size field ([3]string, say) is otherwise unreachable from
+// every collection function. This is the single definition of what those
+// functions accept — the three places that repeat the check for their own
+// reasons all consult it.
+func isSequence(k reflect.Kind) bool {
+	return k == reflect.Slice || k == reflect.Array
+}
+
+// toSlice converts any slice or array to []any. []any is cloned; other types are
+// expanded via reflection. The result is never nil, only ever empty, so that
 // every function built on it inherits that guarantee — see the note on empty
 // results below.
 //
@@ -66,8 +76,8 @@ func toSlice(v any) ([]any, error) {
 		return slices.Clone(s), nil
 	}
 	rv := reflect.ValueOf(v)
-	if !rv.IsValid() || rv.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("expected slice, got %T", v)
+	if !rv.IsValid() || !isSequence(rv.Kind()) {
+		return nil, fmt.Errorf("expected slice or array, got %T", v)
 	}
 	out := make([]any, rv.Len())
 	for i := range rv.Len() {
@@ -425,8 +435,8 @@ func Concat(ins ...any) ([]any, error) {
 	total := 0
 	for i, v := range ins {
 		rv := reflect.ValueOf(v)
-		if !rv.IsValid() || rv.Kind() != reflect.Slice {
-			return nil, fmt.Errorf("concat: argument %d: expected slice, got %T", i, v)
+		if !rv.IsValid() || !isSequence(rv.Kind()) {
+			return nil, fmt.Errorf("concat: argument %d: expected slice or array, got %T", i, v)
 		}
 		total += rv.Len()
 	}
@@ -674,7 +684,7 @@ func MergeMaps(mapsIn ...any) (map[string]any, error) {
 
 // In reports whether val is present in v.
 //
-//   - slice: element membership via reflect.DeepEqual
+//   - slice or array: element membership via reflect.DeepEqual
 //
 //   - map: key existence (val must be assignable to the map's key type)
 //
@@ -695,10 +705,10 @@ func In(v, val any) (bool, error) {
 			return false, fmt.Errorf("in: string search requires string value, got %T", val)
 		}
 		return strings.Contains(rv.String(), s), nil
-	case reflect.Slice:
+	case reflect.Slice, reflect.Array:
 		// Iterate rather than going through toSlice: this is a read-only search
 		// that returns a bool, so there is no result to keep unaliased and no
-		// reason to copy the whole slice to find one element. (The rule against
+		// reason to copy the whole sequence to find one element. (The rule against
 		// non-copying fast paths applies to toSlice, which must protect the
 		// structures it hands back; nothing escapes from here.)
 		if s, ok := v.([]any); ok {

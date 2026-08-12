@@ -40,7 +40,7 @@
 //   - replaceAll(s, old, new) string — replace all occurrences of old with new
 //   - repeat(s, n) string — return n copies of s concatenated
 //   - split(s, sep) []string — split s into substrings separated by sep
-//   - join(elems, sep) string — join elements with sep; accepts any slice type, non-strings via fmt.Sprint
+//   - join(elems, sep) string — join elements with sep; accepts any slice or array, non-strings via fmt.Sprint
 //   - fields(s) []string — split s on whitespace, discarding empty strings
 //   - lenRunes(s) int — number of runes in s; unlike built-in len which counts bytes
 //   - truncate(s, n) string — shorten to at most n runes; appends "…" if truncated
@@ -145,7 +145,7 @@
 //
 // # Collections — Sequence Access
 //
-// These functions operate on any slice type or string. String operations are
+// These functions operate on any slice, array, or string. String operations are
 // rune-aware: multi-byte characters are never split.
 //
 //   - first(v) any — first element of a slice, or first rune of a string

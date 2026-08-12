@@ -623,6 +623,77 @@ func TestIn(t *testing.T) {
 	}
 }
 
+// Arrays are indexable sequences, so every collection function accepts one.
+// Template data reaches them through a fixed-size struct field ([3]string), which
+// was otherwise unusable with this package.
+func TestCollections_acceptArrays(t *testing.T) {
+	cases := []struct {
+		name string
+		got  func() (any, error)
+		want any
+	}{
+		{"Sort", func() (any, error) { return Sort([3]int{3, 1, 2}) }, []any{1, 2, 3}},
+		{"SortNum", func() (any, error) { return SortNum([3]string{"10", "9", "2"}) }, []any{"2", "9", "10"}},
+		{"Reverse", func() (any, error) { return Reverse([3]int{1, 2, 3}) }, []any{3, 2, 1}},
+		{"Compact", func() (any, error) { return Compact([4]int{1, 1, 2, 2}) }, []any{1, 2}},
+		{"Take", func() (any, error) { return Take([4]int{1, 2, 3, 4}, 2) }, []any{1, 2}},
+		{"Drop", func() (any, error) { return Drop([4]int{1, 2, 3, 4}, 2) }, []any{3, 4}},
+		{"First", func() (any, error) { return First([3]int{7, 8, 9}) }, 7},
+		{"Last", func() (any, error) { return Last([3]int{7, 8, 9}) }, 9},
+		{"Concat", func() (any, error) { return Concat([2]int{1, 2}, []int{3}) }, []any{1, 2, 3}},
+		{"Concat of arrays only", func() (any, error) { return Concat([2]int{1, 2}, [1]int{3}) }, []any{1, 2, 3}},
+		{"In present", func() (any, error) { return In([3]int{1, 2, 3}, 2) }, true},
+		{"In absent", func() (any, error) { return In([3]int{1, 2, 3}, 9) }, false},
+		{"Where", func() (any, error) {
+			return Where([2]any{map[string]any{"K": 1}, map[string]any{"K": 2}}, "K", 1)
+		}, []any{map[string]any{"K": 1}}},
+		{"empty array", func() (any, error) { return Sort([0]int{}) }, []any{}},
+	}
+	for _, c := range cases {
+		got, err := c.got()
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s = %#v, want %#v", c.name, got, c.want)
+		}
+	}
+}
+
+// Arrays are values in Go, so an array reaching a function through an `any`
+// parameter has already been copied and the original cannot be reached. The
+// immutability guarantee therefore holds trivially — but only as long as nothing
+// starts taking a pointer to the argument, so it is asserted rather than assumed.
+func TestCollections_doNotMutateArrayInput(t *testing.T) {
+	in := [4]int{3, 1, 1, 2}
+	before := in
+
+	for _, fn := range []func(any) (any, error){
+		func(v any) (any, error) { return Sort(v) },
+		func(v any) (any, error) { return Reverse(v) },
+		func(v any) (any, error) { return Compact(v) },
+		func(v any) (any, error) { return Take(v, 2) },
+		func(v any) (any, error) { return Drop(v, 2) },
+		func(v any) (any, error) { return Concat(v, []int{9}) },
+	} {
+		if _, err := fn(in); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if in != before {
+		t.Errorf("array input mutated: got %v, want %v", in, before)
+	}
+}
+
+func TestToSlice_rejectsNonSequences(t *testing.T) {
+	for _, in := range []any{nil, 42, "a string", map[string]any{"a": 1}, struct{}{}} {
+		if _, err := toSlice(in); err == nil {
+			t.Errorf("toSlice(%#v): expected an error, got nil", in)
+		}
+	}
+}
+
 // Sorting by key must fail loudly on elements it cannot read. Returning the
 // input untouched would look like a successful sort while producing wrong
 // output — see fieldString.
