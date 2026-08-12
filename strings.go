@@ -108,9 +108,13 @@ func Join(v any, sep string) (string, error) {
 // All other characters are left unchanged. It is rune-safe: multi-byte leading
 // characters such as "é" are handled correctly.
 //
-//	firstUpper "go"              → "Go"
-//	firstUpper "hello world"    → "Hello world"
-//	firstUpper "élan"           → "Élan"
+// To also lowercase the rest — what Jinja2 and Twig call capitalize — compose:
+// firstUpper (lower $s).
+//
+//	firstUpper "go"           → "Go"
+//	firstUpper "hello world"  → "Hello world"
+//	firstUpper "élan"         → "Élan"
+//	firstUpper "ǳagreb"       → "ǲagreb"  (title case, not the all-caps "Ǳ")
 func FirstUpper(s string) string {
 	if s == "" {
 		return s
@@ -119,7 +123,10 @@ func FirstUpper(s string) string {
 	if r == utf8.RuneError {
 		return s
 	}
-	return string(unicode.ToUpper(r)) + s[size:]
+	// ToTitle, not ToUpper. The two agree on every character except the Latin
+	// digraphs (ǆ ǉ ǌ ǳ), where the title-case form is the correct one for
+	// capitalizing a word: "ǲagreb", not "Ǳagreb", which is the all-caps form.
+	return string(unicode.ToTitle(r)) + s[size:]
 }
 
 // Truncate shortens s to at most n runes. If s is longer it is cut and an

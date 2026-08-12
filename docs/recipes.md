@@ -14,7 +14,7 @@ firstUpper $str
 
 **Capitalize first letter, lowercase the rest** (like Jinja2 `capitalize`)
 ```
-capitalize $str
+firstUpper (lower $str)
 ```
 
 **Last N elements**

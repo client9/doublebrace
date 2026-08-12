@@ -1,6 +1,9 @@
 package doublebrace
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestJoin(t *testing.T) {
 	cases := []struct {
@@ -105,6 +108,47 @@ func TestFirstUpper(t *testing.T) {
 		got := FirstUpper(c.in)
 		if got != c.want {
 			t.Errorf("FirstUpper(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The Latin digraphs are the only characters where Unicode title case differs
+// from upper case, and they are the reason FirstUpper uses unicode.ToTitle: when
+// capitalizing a word the title-case form is correct, while the upper-case form
+// belongs to a word written entirely in capitals.
+func TestFirstUpper_titleCaseDigraphs(t *testing.T) {
+	cases := []struct {
+		in, want, wrong string
+	}{
+		{"ǳagreb", "ǲagreb", "Ǳagreb"},
+		{"ǆungla", "ǅungla", "Ǆungla"},
+		{"ǉubav", "ǈubav", "Ǉubav"},
+		{"ǌegov", "ǋegov", "Ǌegov"},
+	}
+	for _, c := range cases {
+		got := FirstUpper(c.in)
+		if got != c.want {
+			t.Errorf("FirstUpper(%q) = %q, want %q (upper case %q is the wrong form here)",
+				c.in, got, c.want, c.wrong)
+		}
+	}
+}
+
+// capitalize is deliberately not a function: it composes from the two that
+// exist. This pins the composition the recipes document recommends.
+func TestFirstUpper_composesToCapitalize(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"hELLO", "Hello"},
+		{"hello world", "Hello world"},
+		{"HELLO WORLD", "Hello world"},
+		{"ÉLAN", "Élan"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := FirstUpper(strings.ToLower(c.in)); got != c.want {
+			t.Errorf("firstUpper (lower %q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
