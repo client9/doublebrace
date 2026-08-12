@@ -160,7 +160,7 @@
 //   - concat(slices...) []any — concatenate multiple slices into one
 //   - sort(v [, key]) []any — type-aware sort: numeric types sort numerically, time.Time sorts chronologically, everything else sorts lexicographically; for []any the first non-nil element determines mode; key names a field for slice-of-maps (always lexicographic)
 //   - sortNum(v [, key]) []any — numeric sort via float64 conversion; key names a field for slice-of-maps
-//   - where(v, key, val) []any — filter slice of map[string]any where element[key] == val
+//   - where(v, key, val) []any — filter slice of map[string]any where element[key] equals val; numbers compare by value across types; a missing field is an error
 //
 // For descending order compose with reverse: reverse (sort $pages "Title")
 //
@@ -174,7 +174,7 @@
 //
 // # Collections — General
 //
-//   - in(v, val) bool — membership test: slice (element), map (key existence), string (substring)
+//   - in(v, val) bool — membership test: slice/array (element), map (key existence), string (substring); numbers compare by value across types
 //   - default(def, val) any — return val if non-zero, else def; zero: nil, false, 0, "", empty slice/map, all-zero array/struct (including a zero time.Time)
 //   - cond(ctrl, a, b) any — ternary: return a if ctrl is truthy, else b
 package doublebrace

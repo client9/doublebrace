@@ -1,6 +1,7 @@
 package doublebrace
 
 import (
+	"encoding/json"
 	"math"
 	"reflect"
 	"strings"
@@ -916,6 +917,146 @@ func TestFunctionsReturnEmptyNotNil(t *testing.T) {
 			t.Errorf("jsonify (sort $nil) = %s, want []", j)
 		}
 	})
+}
+
+// The type a number arrives as is an accident of the decoder — encoding/json
+// gives float64, TOML int64, YAML int — and a template literal is int if written
+// 1 and float64 if written 1.0. Matching on identical types made where and in
+// stricter than text/template's own eq, which already unifies integer widths,
+// and the mismatch surfaced as an empty result rather than an error.
+func TestValuesEqual_numericAcrossTypes(t *testing.T) {
+	type Weight int
+
+	cases := []struct {
+		a, b any
+		want bool
+	}{
+		// integer widths and named types unify, as eq does
+		{int(1), int64(1), true},
+		{int64(1), int(1), true},
+		{int32(1), int8(1), true},
+		{Weight(1), int(1), true},
+		{uint(1), int(1), true},
+		{uint8(1), uint64(1), true},
+		// int/float, which eq rejects outright
+		{float64(1), int(1), true},
+		{int(1), float64(1), true},
+		{float32(1), int64(1), true},
+		{float64(1.5), int(1), false},
+		{float64(1.5), float64(1.5), true},
+		// signedness edges
+		{int(-1), uint64(1), false},
+		{int(-1), float64(-1), true},
+		{float64(-1), uint(1), false},
+		// unequal values of differing types stay unequal
+		{int(1), int64(2), false},
+		{float64(2), int(1), false},
+		// non-numbers are untouched
+		{"1", int(1), false}, // a string is not a number here
+		{"a", "a", true},
+		{true, int(1), false},
+		{nil, int(0), false},
+		{[]any{1}, []any{1}, true},
+	}
+	for _, c := range cases {
+		if got := valuesEqual(c.a, c.b); got != c.want {
+			t.Errorf("valuesEqual(%#v, %#v) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// Comparing must narrow the float to an integer, not widen the integer to a
+// float: float64 cannot represent every int64, so widening would report two
+// distinct IDs as equal.
+func TestValuesEqual_largeIntegersAreExact(t *testing.T) {
+	const big = int64(9007199254740993) // 2^53+1, not representable as float64
+	if valuesEqual(big, float64(big)) {
+		t.Error("valuesEqual(2^53+1, float64(2^53+1)) = true; float64 cannot hold that value")
+	}
+	if !valuesEqual(big, big-0) {
+		t.Error("valuesEqual should still match an identical int64")
+	}
+	if valuesEqual(big, big-1) {
+		t.Error("distinct int64 values must not compare equal")
+	}
+	// Values that are exactly representable still match.
+	const exact = int64(1) << 52
+	if !valuesEqual(exact, float64(exact)) {
+		t.Error("an exactly representable integer should match its float64")
+	}
+	// Out-of-range floats never match an integer.
+	if valuesEqual(int64(0), 1e300) {
+		t.Error("an out-of-range float must not match")
+	}
+	for _, f := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if valuesEqual(int64(0), f) {
+			t.Errorf("valuesEqual(0, %v) = true, want false", f)
+		}
+	}
+}
+
+// The end-to-end case: data decoded by encoding/json, filtered with a literal.
+func TestWhereAndIn_jsonDecodedData(t *testing.T) {
+	var pages []any
+	if err := json.Unmarshal([]byte(`[{"W":1,"T":"a"},{"W":2,"T":"b"}]`), &pages); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, val := range []any{1, 1.0, int64(1)} {
+		got, err := Where(pages, "W", val)
+		if err != nil {
+			t.Errorf("Where(json, \"W\", %v): %v", val, err)
+			continue
+		}
+		if s := got.([]any); len(s) != 1 {
+			t.Errorf("Where(json, \"W\", %v) matched %d, want 1", val, len(s))
+		}
+	}
+
+	var nums []any
+	if err := json.Unmarshal([]byte(`[1,2,3]`), &nums); err != nil {
+		t.Fatal(err)
+	}
+	for _, val := range []any{2, 2.0, int64(2)} {
+		ok, err := In(nums, val)
+		if err != nil || !ok {
+			t.Errorf("In(json nums, %v) = %v, %v; want true", val, ok, err)
+		}
+	}
+	if ok, _ := In(nums, 9); ok {
+		t.Error("In(json nums, 9) = true, want false")
+	}
+}
+
+// A missing field must be an error, not an empty result: a typo in the key would
+// otherwise be indistinguishable from data that legitimately did not match.
+func TestWhere_missingKeyIsAnError(t *testing.T) {
+	pages := []any{
+		map[string]any{"Section": "blog"},
+		map[string]any{"Section": "docs"},
+	}
+	if got, err := Where(pages, "Sectoin", "blog"); err == nil {
+		t.Errorf("Where with a misspelled key = %v, want an error", got)
+	}
+	// Present on one element but not another is still an error.
+	mixed := []any{
+		map[string]any{"Draft": true},
+		map[string]any{"Other": 1},
+	}
+	if got, err := Where(mixed, "Draft", true); err == nil {
+		t.Errorf("Where over elements missing the field = %v, want an error", got)
+	}
+	// The ordinary case still works, including a zero-valued field.
+	got, err := Where([]any{
+		map[string]any{"Draft": false},
+		map[string]any{"Draft": true},
+	}, "Draft", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s := got.([]any); len(s) != 1 {
+		t.Errorf("Where matched %d, want 1", len(s))
+	}
 }
 
 func TestDefault(t *testing.T) {

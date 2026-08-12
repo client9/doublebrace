@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -114,6 +115,117 @@ func fieldFloat(v any, key string) (float64, error) {
 		return 0, fmt.Errorf("field %q not found", key)
 	}
 	return toFloat64(val)
+}
+
+// numKind classifies a value's numeric representation. The ordering matters:
+// number.equal canonicalizes its operands by it so each pair of kinds is handled
+// once.
+type numKind int
+
+const (
+	notNumeric numKind = iota
+	numInt
+	numUint
+	numFloat
+)
+
+// number is a numeric value normalized for comparison across types. Only the
+// field named by kind holds a meaningful value.
+type number struct {
+	kind numKind
+	i    int64
+	u    uint64
+	f    float64
+}
+
+// asNumber classifies v by reflect kind, so named types (type Weight int) and
+// every integer and float width are recognized. Strings are deliberately not
+// numeric here: a "1" in the data should not match a 1 in the template, however
+// convenient toFloat64 would make that.
+func asNumber(v any) number {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return number{}
+	}
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return number{kind: numInt, i: rv.Int()}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return number{kind: numUint, u: rv.Uint()}
+	case reflect.Float32, reflect.Float64:
+		return number{kind: numFloat, f: rv.Float()}
+	}
+	return number{}
+}
+
+// floatIsInt reports whether f is a whole number within int64's range, and
+// returns it as an int64.
+//
+// Comparisons go through here rather than widening the integer to a float
+// because float64 cannot represent every int64: converting 9007199254740993 to
+// float64 yields 9007199254740992, so widening would report two distinct IDs as
+// equal. Narrowing the float instead is exact at every magnitude.
+func floatIsInt(f float64) (int64, bool) {
+	if f != math.Trunc(f) {
+		return 0, false
+	}
+	// -float64(math.MinInt64) is 2^63, one past the largest int64 and exactly
+	// representable; math.MinInt64 itself is exactly representable.
+	if f < float64(math.MinInt64) || f >= -float64(math.MinInt64) {
+		return 0, false
+	}
+	return int64(f), true
+}
+
+// floatIsUint is floatIsInt for the unsigned range.
+func floatIsUint(f float64) (uint64, bool) {
+	const twoPow64 = float64(1<<63) * 2 // one past the largest uint64
+	if f != math.Trunc(f) || f < 0 || f >= twoPow64 {
+		return 0, false
+	}
+	return uint64(f), true
+}
+
+// equal reports whether two numbers are equal in value, across kinds.
+func (a number) equal(b number) bool {
+	if a.kind > b.kind {
+		a, b = b, a // canonical order, so each kind pair appears once below
+	}
+	switch {
+	case a.kind == numInt && b.kind == numInt:
+		return a.i == b.i
+	case a.kind == numInt && b.kind == numUint:
+		return a.i >= 0 && uint64(a.i) == b.u
+	case a.kind == numInt && b.kind == numFloat:
+		i, ok := floatIsInt(b.f)
+		return ok && i == a.i
+	case a.kind == numUint && b.kind == numUint:
+		return a.u == b.u
+	case a.kind == numUint && b.kind == numFloat:
+		u, ok := floatIsUint(b.f)
+		return ok && u == a.u
+	default: // both float
+		return a.f == b.f
+	}
+}
+
+// valuesEqual reports whether a and b are equal for filtering and membership
+// tests. Numbers compare by value across types; everything else falls back to
+// reflect.DeepEqual.
+//
+// Numeric comparison exists because the type a number arrives as is an accident
+// of the decoder: encoding/json produces float64, TOML int64, YAML int, and a
+// template literal is int if written 1 and float64 if written 1.0. Matching only
+// on identical types made where and in stricter than the template language's own
+// eq, which already unifies integer widths — and unlike eq, which reports an
+// int/float mismatch as an error, a filter that silently returns nothing looks
+// like data that legitimately did not match.
+func valuesEqual(a, b any) bool {
+	na, nb := asNumber(a), asNumber(b)
+	if na.kind != notNumeric && nb.kind != notNumeric {
+		return na.equal(nb)
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 // isZero reports whether v is the zero value for its type.
@@ -605,10 +717,16 @@ func SortNum(v any, key ...string) (any, error) {
 }
 
 // Where filters a slice of map[string]any by field equality.
-// Only elements where element[key] == val are included in the result.
+// Only elements where element[key] equals val are included in the result.
+//
+// Numbers compare by value regardless of type, so a field decoded from JSON as
+// float64 matches an integer literal. It is an error if any element is not a
+// map[string]any or lacks the named field — a missing field would otherwise drop
+// every element and look like data that simply did not match.
 //
 //	where $pages "Draft" false    → pages where Draft == false
 //	where $pages "Section" "blog" → pages in the blog section
+//	where $pages "Weight" 1       → matches whether Weight is int, int64, or float64
 func Where(v any, key string, val any) (any, error) {
 	elems, err := toSlice(v)
 	if err != nil {
@@ -620,7 +738,14 @@ func Where(v any, key string, val any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("where: elements must be map[string]any, got %T", elem)
 		}
-		if reflect.DeepEqual(m[key], val) {
+		got, exists := m[key]
+		if !exists {
+			// A missing field would compare unequal and quietly drop the element,
+			// making a typo in the key indistinguishable from data that matched
+			// nothing. Sort reports this the same way.
+			return nil, fmt.Errorf("where: field %q not found", key)
+		}
+		if valuesEqual(got, val) {
 			out = append(out, elem)
 		}
 	}
@@ -681,7 +806,8 @@ func MergeMaps(mapsIn ...any) (map[string]any, error) {
 
 // In reports whether val is present in v.
 //
-//   - slice or array: element membership via reflect.DeepEqual
+//   - slice or array: element membership; numbers compare by value across
+//     types, everything else via reflect.DeepEqual
 //
 //   - map: key existence (val must be assignable to the map's key type)
 //
@@ -710,14 +836,14 @@ func In(v, val any) (bool, error) {
 		// structures it hands back; nothing escapes from here.)
 		if s, ok := v.([]any); ok {
 			for _, elem := range s {
-				if reflect.DeepEqual(elem, val) {
+				if valuesEqual(elem, val) {
 					return true, nil
 				}
 			}
 			return false, nil
 		}
 		for i := range rv.Len() {
-			if reflect.DeepEqual(rv.Index(i).Interface(), val) {
+			if valuesEqual(rv.Index(i).Interface(), val) {
 				return true, nil
 			}
 		}
