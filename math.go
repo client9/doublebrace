@@ -1,6 +1,7 @@
 package doublebrace
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -63,7 +64,7 @@ func Div(a, b any) (float64, error) {
 		return 0, err
 	}
 	if y == 0 {
-		return 0, fmt.Errorf("div: division by zero")
+		return 0, errors.New("div: division by zero")
 	}
 	return x / y, nil
 }
@@ -83,7 +84,7 @@ func Mod(a, b any) (float64, error) {
 		return 0, err
 	}
 	if y == 0 {
-		return 0, fmt.Errorf("mod: division by zero")
+		return 0, errors.New("mod: division by zero")
 	}
 	return math.Mod(x, y), nil
 }
@@ -155,7 +156,7 @@ func ModBool(a, b any) (bool, error) {
 		return false, err
 	}
 	if y == 0 {
-		return false, fmt.Errorf("modBool: division by zero")
+		return false, errors.New("modBool: division by zero")
 	}
 	return math.Mod(x, y) == 0, nil
 }
@@ -202,7 +203,7 @@ func Min(args ...any) (float64, error) {
 		return 0, err
 	}
 	if len(vals) == 0 {
-		return 0, fmt.Errorf("min: no arguments")
+		return 0, errors.New("min: no arguments")
 	}
 	m := vals[0]
 	for _, v := range vals[1:] {
@@ -226,7 +227,7 @@ func Max(args ...any) (float64, error) {
 		return 0, err
 	}
 	if len(vals) == 0 {
-		return 0, fmt.Errorf("max: no arguments")
+		return 0, errors.New("max: no arguments")
 	}
 	m := vals[0]
 	for _, v := range vals[1:] {

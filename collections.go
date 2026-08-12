@@ -2,6 +2,7 @@ package doublebrace
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -358,7 +359,7 @@ func Seq(args ...int) ([]int, error) {
 	case 3:
 		start, end, step = args[0], args[1], args[2]
 		if step == 0 {
-			return nil, fmt.Errorf("seq: step cannot be zero")
+			return nil, errors.New("seq: step cannot be zero")
 		}
 	default:
 		return nil, fmt.Errorf("seq: expected 1–3 arguments, got %d", len(args))
@@ -398,7 +399,7 @@ func First(v any) (any, error) {
 	if s, ok := v.(string); ok {
 		r := []rune(s)
 		if len(r) == 0 {
-			return nil, fmt.Errorf("first: empty string")
+			return nil, errors.New("first: empty string")
 		}
 		return string(r[0]), nil
 	}
@@ -407,7 +408,7 @@ func First(v any) (any, error) {
 		return nil, fmt.Errorf("first: %w", err)
 	}
 	if len(elems) == 0 {
-		return nil, fmt.Errorf("first: empty slice")
+		return nil, errors.New("first: empty slice")
 	}
 	return elems[0], nil
 }
@@ -420,7 +421,7 @@ func Last(v any) (any, error) {
 	if s, ok := v.(string); ok {
 		r := []rune(s)
 		if len(r) == 0 {
-			return nil, fmt.Errorf("last: empty string")
+			return nil, errors.New("last: empty string")
 		}
 		return string(r[len(r)-1]), nil
 	}
@@ -429,7 +430,7 @@ func Last(v any) (any, error) {
 		return nil, fmt.Errorf("last: %w", err)
 	}
 	if len(elems) == 0 {
-		return nil, fmt.Errorf("last: empty slice")
+		return nil, errors.New("last: empty slice")
 	}
 	return elems[len(elems)-1], nil
 }
@@ -669,7 +670,7 @@ func Sort(v any, key ...string) ([]any, error) {
 		return sortByKey(out, func(e any) (float64, error) {
 			f, err := toFloat64(e)
 			if err != nil {
-				return 0, fmt.Errorf("sort: cannot convert element to number")
+				return 0, errors.New("sort: cannot convert element to number")
 			}
 			return f, nil
 		}, cmp.Compare[float64])
@@ -677,7 +678,7 @@ func Sort(v any, key ...string) ([]any, error) {
 		return sortByKey(out, func(e any) (time.Time, error) {
 			t, ok := e.(time.Time)
 			if !ok {
-				return time.Time{}, fmt.Errorf("sort: element is not time.Time")
+				return time.Time{}, errors.New("sort: element is not time.Time")
 			}
 			return t, nil
 		}, time.Time.Compare)
@@ -715,7 +716,7 @@ func SortNum(v any, key ...string) ([]any, error) {
 	return sortByKey(out, func(e any) (float64, error) {
 		f, err := toFloat64(e)
 		if err != nil {
-			return 0, fmt.Errorf("sortNum: cannot convert value to number")
+			return 0, errors.New("sortNum: cannot convert value to number")
 		}
 		return f, nil
 	}, cmp.Compare[float64])

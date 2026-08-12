@@ -1,6 +1,7 @@
 package doublebrace
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"net/url"
@@ -40,7 +41,7 @@ func safeString(s any) (string, error) {
 	case []byte:
 		return string(v), nil
 	case nil:
-		return "", fmt.Errorf("safe: nil input")
+		return "", errors.New("safe: nil input")
 	default:
 		return fmt.Sprint(v), nil
 	}
