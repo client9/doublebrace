@@ -2,6 +2,74 @@ package doublebrace
 
 import "testing"
 
+func TestJoin(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		sep  string
+		want string
+	}{
+		{"[]string", []string{"a", "b", "c"}, ", ", "a, b, c"},
+		{"[]any of strings", []any{"a", "b", "c"}, ", ", "a, b, c"},
+		{"[]any mixed", []any{1, "b", 2.5}, "-", "1-b-2.5"},
+		{"[]int", []int{1, 2, 3}, "+", "1+2+3"},
+		{"named slice type", Titles{"a", "b"}, ",", "a,b"},
+		{"empty separator", []any{"a", "b"}, "", "ab"},
+		{"single element", []any{"a"}, ", ", "a"},
+		{"empty slice", []any{}, ", ", ""},
+		{"nil element renders as <nil>", []any{"a", nil}, ",", "a,<nil>"},
+	}
+	for _, c := range cases {
+		got, err := Join(c.in, c.sep)
+		if err != nil {
+			t.Errorf("%s: Join(%v, %q) unexpected error: %v", c.name, c.in, c.sep, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s: Join(%v, %q) = %q, want %q", c.name, c.in, c.sep, got, c.want)
+		}
+	}
+}
+
+// Titles exercises Join against a named slice type, which reaches the
+// reflection path in toSlice rather than the []string fast path.
+type Titles []string
+
+func TestJoin_notASlice(t *testing.T) {
+	for _, in := range []any{nil, 42, "already a string", map[string]any{"a": 1}} {
+		if _, err := Join(in, ","); err == nil {
+			t.Errorf("Join(%#v, \",\") expected an error, got nil", in)
+		}
+	}
+}
+
+// join must compose with the collection functions, all of which return []any.
+// Before Join existed, join was bound directly to strings.Join and every one of
+// these pipelines failed at execution with "expected []string; got []interface{}".
+func TestJoin_composesWithCollections(t *testing.T) {
+	list := []any{"c", "a", "b"}
+
+	sorted, err := Sort(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Join(sorted, ", "); got != "a, b, c" {
+		t.Errorf("join (sort $list) = %q, want %q", got, "a, b, c")
+	}
+
+	dropped, err := Drop(list, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Join(dropped, ", "); got != "c, a" {
+		t.Errorf("join (drop $list -1) = %q, want %q", got, "c, a")
+	}
+
+	if got, _ := Join(List("a", "b"), "-"); got != "a-b" {
+		t.Errorf("join (list \"a\" \"b\") = %q, want %q", got, "a-b")
+	}
+}
+
 func TestReplace(t *testing.T) {
 	cases := []struct {
 		s, old, new string

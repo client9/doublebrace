@@ -66,15 +66,20 @@ func toSlice(v any) ([]any, error) {
 }
 
 // fieldString returns the string representation of a named field in a
-// map[string]any element. Returns "" if the element is not a map or the key
-// is absent.
-func fieldString(v any, key string) string {
-	if m, ok := v.(map[string]any); ok {
-		if val, exists := m[key]; exists {
-			return fmt.Sprint(val)
-		}
+// map[string]any element. It errors when the element is not a map or the key is
+// absent: returning "" instead would make every element compare equal, so a
+// mistyped key or a slice of non-maps would silently yield unsorted output
+// rather than a diagnosable failure.
+func fieldString(v any, key string) (string, error) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("element is not map[string]any, got %T", v)
 	}
-	return ""
+	val, exists := m[key]
+	if !exists {
+		return "", fmt.Errorf("field %q not found", key)
+	}
+	return fmt.Sprint(val), nil
 }
 
 // fieldFloat returns the float64 value of a named field in a map[string]any element.
@@ -361,6 +366,13 @@ func Concat(ins ...any) ([]any, error) {
 	return out, nil
 }
 
+// keyedElem pairs a collection element with its precomputed sort key, so that
+// key extraction happens once per element rather than once per comparison.
+type keyedElem struct {
+	key  string
+	elem any
+}
+
 type sortMode int
 
 const (
@@ -394,7 +406,8 @@ func inferSortMode(elems []any) sortMode {
 //   - everything else sorts lexicographically (string comparison)
 //
 // For []any, the first non-nil element determines the sort mode.
-// An optional key names a field for slice-of-maps sorting (always lexicographic).
+// An optional key names a field for slice-of-maps sorting (always lexicographic);
+// it is an error if any element is not a map[string]any or lacks that key.
 // For descending order, compose with reverse.
 // ISO 8601 date strings ("2006-01-02") sort correctly lexicographically.
 //
@@ -409,9 +422,24 @@ func Sort(v any, key ...string) (any, error) {
 	out := slices.Clone(elems)
 	if len(key) > 0 {
 		k := key[0]
-		slices.SortStableFunc(out, func(a, b any) int {
-			return strings.Compare(fieldString(a, k), fieldString(b, k))
+		// Extract the sort keys up front rather than inside the comparator.
+		// This reports a bad element or missing field even for inputs too short
+		// for the comparator to run, and formats each key once instead of on
+		// every comparison.
+		keyed := make([]keyedElem, len(out))
+		for i, e := range out {
+			s, err := fieldString(e, k)
+			if err != nil {
+				return nil, fmt.Errorf("sort: key %q: %w", k, err)
+			}
+			keyed[i] = keyedElem{key: s, elem: e}
+		}
+		slices.SortStableFunc(keyed, func(a, b keyedElem) int {
+			return strings.Compare(a.key, b.key)
 		})
+		for i, p := range keyed {
+			out[i] = p.elem
+		}
 		return out, nil
 	}
 	var sortErr error
@@ -562,7 +590,7 @@ func MergeMaps(mapsIn ...any) (map[string]any, error) {
 //
 //   - slice: element membership via reflect.DeepEqual
 //
-//   - map[string]any: key existence (val must be string)
+//   - map: key existence (val must be assignable to the map's key type)
 //
 //   - string: substring search (val must be string)
 //
@@ -593,11 +621,15 @@ func In(v, val any) (bool, error) {
 		}
 		return false, nil
 	case reflect.Map:
-		s, ok := val.(string)
-		if !ok {
-			return false, fmt.Errorf("in: map key search requires string value, got %T", val)
+		// reflect.Value.MapIndex panics if val is not assignable to the map's
+		// key type, so check before indexing. Any key type is supported, not
+		// just string: in $m 1 works on a map[int]any.
+		kt := rv.Type().Key()
+		kv := reflect.ValueOf(val)
+		if !kv.IsValid() || !kv.Type().AssignableTo(kt) {
+			return false, fmt.Errorf("in: map key search requires %s, got %T", kt, val)
 		}
-		return rv.MapIndex(reflect.ValueOf(s)).IsValid(), nil
+		return rv.MapIndex(kv).IsValid(), nil
 	default:
 		return false, fmt.Errorf("in: unsupported type %T", v)
 	}

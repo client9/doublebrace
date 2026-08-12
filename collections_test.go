@@ -476,6 +476,74 @@ func TestIn(t *testing.T) {
 	}
 }
 
+// Sorting by key must fail loudly on elements it cannot read. Returning the
+// input untouched would look like a successful sort while producing wrong
+// output — see fieldString.
+func TestSort_keyErrors(t *testing.T) {
+	type page struct{ Title string }
+
+	cases := []struct {
+		name string
+		in   []any
+	}{
+		{"structs, not maps", []any{page{"Zebra"}, page{"Apple"}}},
+		{"single struct element", []any{page{"Zebra"}}},
+		{"scalars", []any{"Zebra", "Apple"}},
+		{"key absent from element", []any{
+			map[string]any{"Title": "Zebra"},
+			map[string]any{"Other": "Apple"},
+		}},
+		{"key absent from single element", []any{map[string]any{"Other": "Apple"}}},
+	}
+	for _, c := range cases {
+		got, err := Sort(c.in, "Title")
+		if err == nil {
+			t.Errorf("%s: Sort(%v, \"Title\") expected an error, got %v", c.name, c.in, got)
+		}
+	}
+}
+
+func TestSort_keyMissingOnEmptyInput(t *testing.T) {
+	// Nothing to read a field from, so nothing to fail on.
+	got, err := Sort([]any{}, "Title")
+	if err != nil {
+		t.Errorf("Sort([], \"Title\") = %v, want no error", err)
+	}
+	if s := got.([]any); len(s) != 0 {
+		t.Errorf("Sort([], \"Title\") = %v, want empty", s)
+	}
+}
+
+// In must not panic when the search value cannot be used as a key for the map's
+// key type — reflect.Value.MapIndex panics on an unassignable key.
+func TestIn_mapKeyTypes(t *testing.T) {
+	// Non-string key types are supported.
+	ok, err := In(map[int]string{1: "a"}, 1)
+	if err != nil || !ok {
+		t.Errorf("in map[int]string with int key: expected true, got %v %v", ok, err)
+	}
+	ok, err = In(map[int]string{1: "a"}, 2)
+	if err != nil || ok {
+		t.Errorf("in map[int]string missing key: expected false, got %v %v", ok, err)
+	}
+
+	// Mismatched key types are an error, not a panic.
+	for _, c := range []struct {
+		name string
+		m    any
+		val  any
+	}{
+		{"string key against map[int]", map[int]string{1: "a"}, "1"},
+		{"int key against map[string]", map[string]any{"x": 1}, 1},
+		{"nil key", map[string]any{"x": 1}, nil},
+	} {
+		ok, err := In(c.m, c.val)
+		if err == nil {
+			t.Errorf("%s: expected an error, got %v", c.name, ok)
+		}
+	}
+}
+
 func TestDefault(t *testing.T) {
 	cases := []struct {
 		def  any

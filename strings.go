@@ -1,6 +1,7 @@
 package doublebrace
 
 import (
+	"fmt"
 	"strings"
 	"text/template"
 	"unicode"
@@ -33,7 +34,7 @@ func stringFuncMap() template.FuncMap {
 
 		// Split / join
 		"split":  strings.Split,
-		"join":   strings.Join,
+		"join":   Join,
 		"fields": strings.Fields,
 
 		// Case — first character only
@@ -70,6 +71,37 @@ func Replace(s, old, new string, n ...int) string {
 		count = n[0]
 	}
 	return strings.Replace(s, old, new, count)
+}
+
+// Join concatenates the elements of v, placing sep between them.
+//
+// Unlike strings.Join, v may be any slice type, not just []string. This is what
+// makes join composable with the collection functions, which all return []any:
+// join (sort $list) ", " works, as does join (drop $list -1) ", ".
+//
+// Elements that are not strings are formatted with fmt.Sprint, matching how
+// {{ . }} renders them; a nil element therefore joins as "<nil>".
+//
+//	join (list "a" "b" "c") ", "  → "a, b, c"
+//	join (split "a,b" ",") "-"    → "a-b"
+//	join (list 1 2 3) "+"         → "1+2+3"
+func Join(v any, sep string) (string, error) {
+	if ss, ok := v.([]string); ok {
+		return strings.Join(ss, sep), nil
+	}
+	elems, err := toSlice(v)
+	if err != nil {
+		return "", fmt.Errorf("join: %w", err)
+	}
+	parts := make([]string, len(elems))
+	for i, e := range elems {
+		if s, ok := e.(string); ok {
+			parts[i] = s
+			continue
+		}
+		parts[i] = fmt.Sprint(e)
+	}
+	return strings.Join(parts, sep), nil
 }
 
 // FirstUpper returns s with the first rune converted to its Unicode title case.

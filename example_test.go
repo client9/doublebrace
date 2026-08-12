@@ -494,6 +494,23 @@ func ExampleLenRunes() {
 	// 3
 }
 
+func ExampleJoin() {
+	v, _ := doublebrace.Join([]string{"a", "b", "c"}, ", ")
+	fmt.Println(v)
+	// Output:
+	// a, b, c
+}
+
+// Join accepts any slice type, so it composes with the collection functions,
+// which all return []any.
+func ExampleJoin_collection() {
+	sorted, _ := doublebrace.Sort(doublebrace.List("c", "a", "b"))
+	v, _ := doublebrace.Join(sorted, " > ")
+	fmt.Println(v)
+	// Output:
+	// a > b > c
+}
+
 func ExampleReplace() {
 	fmt.Println(doublebrace.Replace("aabbaa", "a", "x"))
 	// Output:
