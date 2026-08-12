@@ -8,6 +8,13 @@ import (
 	"unicode/utf8"
 )
 
+// Entries assigned straight from strings are deliberately not wrapped in an
+// exported function of this package: an alias that only forwards to
+// strings.ToLower is a worse way to call strings.ToLower. Each is named in the
+// doc.go listing so a Go caller knows what to call instead. Assigning a stdlib
+// function directly is only allowed where it already honors the package's
+// guarantees — notably that it never returns nil, which
+// TestFunctionsReturnEmptyNotNil pins for split and fields.
 func stringFuncMap() template.FuncMap {
 	return template.FuncMap{
 		// Case

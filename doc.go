@@ -10,6 +10,15 @@
 // index treat them identically — but encoding/json can, so a nil result would
 // make jsonify emit null where a consuming script expects [].
 //
+// Most functions are also exported as named Go functions — Truncate, Sort,
+// Where — so they are callable directly and visible on pkg.go.dev. A function
+// whose behavior is exactly a stdlib call is the exception: it is registered by
+// direct assignment and has no exported counterpart here, because an alias that
+// only forwards to strings.ToLower would be a worse way to call strings.ToLower.
+// The listings below name the stdlib function in each such case; call it
+// directly. A stdlib function may only be registered this way if it already
+// satisfies the guarantees above, in particular that it never returns nil.
+//
 // # Usage
 //
 //	import "github.com/client9/doublebrace"
@@ -25,23 +34,23 @@
 //
 // # Strings
 //
-//   - lower(s) string — convert to lowercase
-//   - upper(s) string — convert to uppercase
-//   - trim(s) string — remove leading and trailing whitespace
-//   - trimPrefix(s, prefix) string — remove prefix if present
-//   - trimSuffix(s, suffix) string — remove suffix if present
-//   - trimLeft(s, cutset) string — remove leading characters contained in cutset
-//   - trimRight(s, cutset) string — remove trailing characters contained in cutset
-//   - contains(s, substr) bool — report whether substr is within s
-//   - hasPrefix(s, prefix) bool — report whether s begins with prefix
-//   - hasSuffix(s, suffix) bool — report whether s ends with suffix
-//   - count(s, substr) int — count non-overlapping instances of substr in s; "" counts runes+1
+//   - lower(s) string — convert to lowercase (strings.ToLower)
+//   - upper(s) string — convert to uppercase (strings.ToUpper)
+//   - trim(s) string — remove leading and trailing whitespace (strings.TrimSpace)
+//   - trimPrefix(s, prefix) string — remove prefix if present (strings.TrimPrefix)
+//   - trimSuffix(s, suffix) string — remove suffix if present (strings.TrimSuffix)
+//   - trimLeft(s, cutset) string — remove leading characters contained in cutset (strings.TrimLeft)
+//   - trimRight(s, cutset) string — remove trailing characters contained in cutset (strings.TrimRight)
+//   - contains(s, substr) bool — report whether substr is within s (strings.Contains)
+//   - hasPrefix(s, prefix) bool — report whether s begins with prefix (strings.HasPrefix)
+//   - hasSuffix(s, suffix) bool — report whether s ends with suffix (strings.HasSuffix)
+//   - count(s, substr) int — count non-overlapping instances of substr in s; "" counts runes+1 (strings.Count)
 //   - replace(s, old, new [, n]) string — replace first occurrence of old with new; optional n sets limit (-1 replaces all)
-//   - replaceAll(s, old, new) string — replace all occurrences of old with new
-//   - repeat(s, n) string — return n copies of s concatenated
-//   - split(s, sep) []string — split s into substrings separated by sep
+//   - replaceAll(s, old, new) string — replace all occurrences of old with new (strings.ReplaceAll)
+//   - repeat(s, n) string — return n copies of s concatenated (strings.Repeat)
+//   - split(s, sep) []string — split s into substrings separated by sep (strings.Split)
 //   - join(elems, sep) string — join elements with sep; accepts any slice or array, non-strings via fmt.Sprint
-//   - fields(s) []string — split s on whitespace, discarding empty strings
+//   - fields(s) []string — split s on whitespace, discarding empty strings (strings.Fields)
 //   - lenRunes(s) int — number of runes in s; unlike built-in len which counts bytes
 //   - truncate(s, n) string — shorten to at most n runes; appends "…" if truncated
 //   - firstUpper(s) string — uppercase first rune only; all other characters unchanged
