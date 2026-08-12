@@ -721,6 +721,68 @@ func TestSort_keyErrors(t *testing.T) {
 	}
 }
 
+// sortNum must reject what it cannot convert regardless of how many elements it
+// was given. Validating inside the comparator made this length-dependent:
+// slices.SortStableFunc never calls a comparator on fewer than two elements, so
+// a one-element slice of unconvertible values was silently accepted while the
+// same template broke as soon as a second element arrived.
+func TestSortNum_errorsAreNotLengthDependent(t *testing.T) {
+	type page struct{ Year int }
+
+	cases := []struct {
+		name string
+		in   []any
+		key  []string
+	}{
+		{"one struct, keyed", []any{page{2020}}, []string{"Year"}},
+		{"two structs, keyed", []any{page{2020}, page{2021}}, []string{"Year"}},
+		{"one map missing the key", []any{map[string]any{"X": 1}}, []string{"Year"}},
+		{"two maps missing the key", []any{
+			map[string]any{"X": 1}, map[string]any{"X": 2},
+		}, []string{"Year"}},
+		{"one map with a non-numeric field", []any{
+			map[string]any{"Year": "not a number"},
+		}, []string{"Year"}},
+		{"one non-numeric value", []any{"abc"}, nil},
+		{"two non-numeric values", []any{"abc", "def"}, nil},
+		{"one non-numeric among numbers", []any{"abc", 1, 2}, nil},
+	}
+	for _, c := range cases {
+		got, err := SortNum(c.in, c.key...)
+		if err == nil {
+			t.Errorf("%s: SortNum(%v, %v) = %v, want an error", c.name, c.in, c.key, got)
+		}
+	}
+}
+
+// Sort and SortNum sit next to each other and must agree on bad input, since
+// that is how the two drifted apart in the first place.
+func TestSortAndSortNum_agreeOnBadInput(t *testing.T) {
+	type page struct{ N int }
+	in := []any{page{1}} // single element: the case that used to differ
+
+	if _, err := Sort(in, "N"); err == nil {
+		t.Error("Sort([1 struct], \"N\"): expected an error")
+	}
+	if _, err := SortNum(in, "N"); err == nil {
+		t.Error("SortNum([1 struct], \"N\"): expected an error")
+	}
+}
+
+func TestSortNum_emptyInput(t *testing.T) {
+	// Nothing to convert, so nothing to fail on.
+	for _, key := range [][]string{nil, {"Year"}} {
+		got, err := SortNum([]any{}, key...)
+		if err != nil {
+			t.Errorf("SortNum([], %v) = %v, want no error", key, err)
+			continue
+		}
+		if s := got.([]any); len(s) != 0 {
+			t.Errorf("SortNum([], %v) = %v, want empty", key, s)
+		}
+	}
+}
+
 func TestSort_keyMissingOnEmptyInput(t *testing.T) {
 	// Nothing to read a field from, so nothing to fail on.
 	got, err := Sort([]any{}, "Title")

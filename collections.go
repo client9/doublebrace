@@ -457,11 +457,37 @@ func Concat(ins ...any) ([]any, error) {
 	return out, nil
 }
 
-// keyedElem pairs a collection element with its precomputed sort key, so that
-// key extraction happens once per element rather than once per comparison.
-type keyedElem struct {
-	key  string
+// keyedElem pairs a collection element with its precomputed sort key.
+type keyedElem[K any] struct {
+	key  K
 	elem any
+}
+
+// sortByKey sorts elems by a key extracted from each element, in place, and
+// returns it. elems must already be a private copy; callers get theirs from
+// toSlice.
+//
+// Extracting every key before sorting rather than inside the comparator is what
+// makes the error reporting reliable: slices.SortStableFunc never calls a
+// comparator on fewer than two elements, so validation done there silently
+// passes a one-element slice of elements it should have rejected. It also runs
+// keyFn once per element instead of once per comparison.
+func sortByKey[K any](elems []any, keyFn func(any) (K, error), cmpFn func(K, K) int) ([]any, error) {
+	keyed := make([]keyedElem[K], len(elems))
+	for i, e := range elems {
+		k, err := keyFn(e)
+		if err != nil {
+			return nil, err
+		}
+		keyed[i] = keyedElem[K]{key: k, elem: e}
+	}
+	slices.SortStableFunc(keyed, func(a, b keyedElem[K]) int {
+		return cmpFn(a.key, b.key)
+	})
+	for i, p := range keyed {
+		elems[i] = p.elem
+	}
+	return elems, nil
 }
 
 type sortMode int
@@ -513,61 +539,42 @@ func Sort(v any, key ...string) (any, error) {
 	}
 	if len(key) > 0 {
 		k := key[0]
-		// Extract the sort keys up front rather than inside the comparator.
-		// This reports a bad element or missing field even for inputs too short
-		// for the comparator to run, and formats each key once instead of on
-		// every comparison.
-		keyed := make([]keyedElem, len(out))
-		for i, e := range out {
+		return sortByKey(out, func(e any) (string, error) {
 			s, err := fieldString(e, k)
 			if err != nil {
-				return nil, fmt.Errorf("sort: key %q: %w", k, err)
+				return "", fmt.Errorf("sort: key %q: %w", k, err)
 			}
-			keyed[i] = keyedElem{key: s, elem: e}
-		}
-		slices.SortStableFunc(keyed, func(a, b keyedElem) int {
-			return strings.Compare(a.key, b.key)
-		})
-		for i, p := range keyed {
-			out[i] = p.elem
-		}
-		return out, nil
+			return s, nil
+		}, cmp.Compare[string])
 	}
-	var sortErr error
 	switch inferSortMode(out) {
 	case sortNumeric:
-		slices.SortStableFunc(out, func(a, b any) int {
-			fa, ea := toFloat64(a)
-			fb, eb := toFloat64(b)
-			if ea != nil || eb != nil {
-				sortErr = fmt.Errorf("sort: cannot convert element to number")
-				return 0
+		return sortByKey(out, func(e any) (float64, error) {
+			f, err := toFloat64(e)
+			if err != nil {
+				return 0, fmt.Errorf("sort: cannot convert element to number")
 			}
-			return cmp.Compare(fa, fb)
-		})
+			return f, nil
+		}, cmp.Compare[float64])
 	case sortTime:
-		slices.SortStableFunc(out, func(a, b any) int {
-			ta, oka := a.(time.Time)
-			tb, okb := b.(time.Time)
-			if !oka || !okb {
-				sortErr = fmt.Errorf("sort: element is not time.Time")
-				return 0
+		return sortByKey(out, func(e any) (time.Time, error) {
+			t, ok := e.(time.Time)
+			if !ok {
+				return time.Time{}, fmt.Errorf("sort: element is not time.Time")
 			}
-			return ta.Compare(tb)
-		})
+			return t, nil
+		}, time.Time.Compare)
 	default:
-		slices.SortStableFunc(out, func(a, b any) int {
-			return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
-		})
+		return sortByKey(out, func(e any) (string, error) {
+			return fmt.Sprint(e), nil
+		}, cmp.Compare[string])
 	}
-	if sortErr != nil {
-		return nil, sortErr
-	}
-	return out, nil
 }
 
 // SortNum returns a new slice sorted numerically using toFloat64 conversion.
-// An optional key names a field for slice-of-maps sorting.
+// An optional key names a field for slice-of-maps sorting. It is an error if any
+// element cannot be converted, or — with a key — is not a map[string]any or lacks
+// that key.
 // For descending order, compose with reverse.
 //
 //	sortNum (list "10" "9" "2") → ["2" "9" "10"]
@@ -578,33 +585,23 @@ func SortNum(v any, key ...string) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sortNum: %w", err)
 	}
-	var sortErr error
 	if len(key) > 0 {
 		k := key[0]
-		slices.SortStableFunc(out, func(a, b any) int {
-			fa, ea := fieldFloat(a, k)
-			fb, eb := fieldFloat(b, k)
-			if ea != nil || eb != nil {
-				sortErr = fmt.Errorf("sortNum: cannot convert field %q to number", k)
-				return 0
+		return sortByKey(out, func(e any) (float64, error) {
+			f, err := fieldFloat(e, k)
+			if err != nil {
+				return 0, fmt.Errorf("sortNum: cannot convert field %q to number", k)
 			}
-			return cmp.Compare(fa, fb)
-		})
-	} else {
-		slices.SortStableFunc(out, func(a, b any) int {
-			fa, ea := toFloat64(a)
-			fb, eb := toFloat64(b)
-			if ea != nil || eb != nil {
-				sortErr = fmt.Errorf("sortNum: cannot convert value to number")
-				return 0
-			}
-			return cmp.Compare(fa, fb)
-		})
+			return f, nil
+		}, cmp.Compare[float64])
 	}
-	if sortErr != nil {
-		return nil, sortErr
-	}
-	return out, nil
+	return sortByKey(out, func(e any) (float64, error) {
+		f, err := toFloat64(e)
+		if err != nil {
+			return 0, fmt.Errorf("sortNum: cannot convert value to number")
+		}
+		return f, nil
+	}, cmp.Compare[float64])
 }
 
 // Where filters a slice of map[string]any by field equality.
