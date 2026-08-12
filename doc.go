@@ -75,7 +75,7 @@
 // Cast functions convert values between types. Useful when frontmatter values
 // arrive as strings and numeric operations are needed.
 //
-//   - toInt(v) int — convert to int; floats are truncated toward zero
+//   - toInt(v) int — convert to int; floats truncate toward zero; strings parse as integer then float ("3.9" → 3); out-of-range values are an error
 //   - toFloat(v) float64 — convert to float64
 //
 // # Time
