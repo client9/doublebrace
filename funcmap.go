@@ -22,7 +22,7 @@ func FuncMap() template.FuncMap {
 // Merge combines multiple template.FuncMaps into one new map.
 // Later maps win on key collision, so user-defined functions override defaults:
 //
-//	fns := funcs.Merge(funcs.FuncMap(), template.FuncMap{"myFunc": myFunc})
+//	fns := doublebrace.Merge(doublebrace.FuncMap(), template.FuncMap{"myFunc": myFunc})
 func Merge(fms ...template.FuncMap) template.FuncMap {
 	out := make(template.FuncMap)
 	for _, m := range fms {

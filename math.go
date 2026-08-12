@@ -134,8 +134,8 @@ func applyFunc(a any, fn func(float64) float64) (float64, error) {
 
 // Pow returns base raised to the power of exp.
 //
-//	Pow(2, 10) → 1024
-//	Pow(9, 0.5) → 3  (square root)
+//	pow 2 10  → 1024
+//	pow 9 0.5 → 3     (square root)
 func Pow(base, exp any) (float64, error) {
 	return applyOp(base, exp, math.Pow)
 }
@@ -143,8 +143,8 @@ func Pow(base, exp any) (float64, error) {
 // ModBool reports whether a is evenly divisible by b (a mod b == 0).
 // Useful for alternating row styles: {{if modBool $i 2}}even{{end}}
 //
-//	ModBool(4, 2) → true
-//	ModBool(5, 2) → false
+//	modBool 4 2 → true
+//	modBool 5 2 → false
 func ModBool(a, b any) (bool, error) {
 	x, err := toFloat64(a)
 	if err != nil {
@@ -193,10 +193,9 @@ func flattenNumbers(args []any) ([]float64, error) {
 // Accepts one or more scalars, slices, arrays, or a mix; sequences are flattened
 // recursively.
 //
-//	Min(3, 1, 2)              → 1
-//	Min([]int{5, 2, 8})       → 2
-//	Min([]int{5, 2}, 1, 9)    → 1
-//	Min([3]int{5, 2, 8})      → 2
+//	min 3 1 2       → 1
+//	min $nums       → 2    ($nums is a slice or array of numbers)
+//	min $nums 1 9   → 1
 func Min(args ...any) (float64, error) {
 	vals, err := flattenNumbers(args)
 	if err != nil {
@@ -218,10 +217,9 @@ func Min(args ...any) (float64, error) {
 // Accepts one or more scalars, slices, arrays, or a mix; sequences are flattened
 // recursively.
 //
-//	Max(3, 1, 2)              → 3
-//	Max([]int{5, 2, 8})       → 8
-//	Max([]int{5, 2}, 9, 1)    → 9
-//	Max([3]int{5, 2, 8})      → 8
+//	max 3 1 2       → 3
+//	max $nums       → 8    ($nums is a slice or array of numbers)
+//	max $nums 9 1   → 9
 func Max(args ...any) (float64, error) {
 	vals, err := flattenNumbers(args)
 	if err != nil {

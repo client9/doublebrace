@@ -493,9 +493,9 @@ func sortByKey[K any](elems []any, keyFn func(any) (K, error), cmpFn func(K, K) 
 type sortMode int
 
 const (
-	sortLex     sortMode = iota
-	sortNumeric sortMode = iota
-	sortTime    sortMode = iota
+	sortLex sortMode = iota
+	sortNumeric
+	sortTime
 )
 
 // inferSortMode inspects the first non-nil element of elems to decide how to sort.
