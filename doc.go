@@ -175,6 +175,6 @@
 // # Collections — General
 //
 //   - in(v, val) bool — membership test: slice (element), map (key existence), string (substring)
-//   - default(def, val) any — return val if non-zero, else def; zero: nil, false, 0, "", empty slice/map
+//   - default(def, val) any — return val if non-zero, else def; zero: nil, false, 0, "", empty slice/map, all-zero array/struct (including a zero time.Time)
 //   - cond(ctrl, a, b) any — ternary: return a if ctrl is truthy, else b
 package doublebrace

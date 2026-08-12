@@ -807,6 +807,117 @@ func TestDefault(t *testing.T) {
 	}
 }
 
+// A struct with all-zero fields is a zero value, so default and cond must treat
+// it as one. The case that motivates this is an unset date: before, every struct
+// fell through to "not zero" and {{ default "Draft" .Date }} never fell back.
+func TestIsZero_structs(t *testing.T) {
+	type page struct {
+		Title string
+		Count int
+	}
+
+	cases := []struct {
+		name string
+		v    any
+		want bool
+	}{
+		{"zero time", time.Time{}, true},
+		{"zero time in UTC", time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC), true},
+		// t.In and t.Local set the location field, so the struct is no longer
+		// all-zero by reflection even though the time itself still is. The
+		// IsZero method is what gets these right.
+		{"zero time in a fixed zone", time.Time{}.In(time.FixedZone("X", 3600)), true},
+		{"zero time localized", time.Time{}.Local(), true},
+		{"non-zero time", time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC), false},
+		{"empty struct type", struct{}{}, true},
+		{"struct with zero fields", page{}, true},
+		{"struct with one field set", page{Title: "x"}, false},
+		{"struct with zero-valued field set", page{Count: 0}, true},
+		{"pointer to zero struct", &page{}, false}, // a non-nil pointer is not zero
+	}
+	for _, c := range cases {
+		if got := isZero(c.v); got != c.want {
+			t.Errorf("%s: isZero(%#v) = %v, want %v", c.name, c.v, got, c.want)
+		}
+	}
+}
+
+// Arrays go by zero-ness rather than emptiness, so that isZero's stated
+// definition — the zero value for its type — holds for them. An array's length
+// is fixed, so the emptiness test slices and maps use would mean an array can
+// only ever be zero when its type has length 0.
+func TestIsZero_arrays(t *testing.T) {
+	type page struct{ Title string }
+
+	cases := []struct {
+		name string
+		v    any
+		want bool
+	}{
+		{"zero-length array", [0]int{}, true},
+		{"all-zero ints", [3]int{}, true},
+		{"all-zero ints written out", [3]int{0, 0, 0}, true},
+		{"first element set", [3]int{1, 0, 0}, false},
+		{"last element set", [3]int{0, 0, 1}, false},
+		{"all-empty strings", [2]string{}, true},
+		{"one non-empty string", [2]string{"a", ""}, false},
+		{"array of zero structs", [2]page{}, true},
+		{"array of one non-zero struct", [2]page{{Title: "x"}}, false},
+	}
+	for _, c := range cases {
+		if got := isZero(c.v); got != c.want {
+			t.Errorf("%s: isZero(%#v) = %v, want %v", c.name, c.v, got, c.want)
+		}
+	}
+
+	// Slices keep emptiness semantics: unlike an array, a slice of three zeros
+	// is a different thing from an empty slice.
+	if isZero([]int{0, 0, 0}) {
+		t.Error("isZero([]int{0,0,0}) = true, want false: slices go by length")
+	}
+	if !isZero([]int{}) {
+		t.Error("isZero([]int{}) = false, want true")
+	}
+}
+
+// The struct change must not disturb the kinds isZero already handled.
+func TestIsZero_nonStructsUnchanged(t *testing.T) {
+	cases := []struct {
+		v    any
+		want bool
+	}{
+		{nil, true},
+		{false, true}, {true, false},
+		{0, true}, {42, false}, {-1, false},
+		{uint(0), true}, {uint(1), false},
+		{0.0, true}, {1.5, false},
+		{"", true}, {"x", false},
+		{[]int{}, true}, {[]int{1}, false},
+		{map[string]any{}, true}, {map[string]any{"a": 1}, false},
+		{(*int)(nil), true},
+		{time.Duration(0), true}, {time.Second, false},
+	}
+	for _, c := range cases {
+		if got := isZero(c.v); got != c.want {
+			t.Errorf("isZero(%#v) = %v, want %v", c.v, got, c.want)
+		}
+	}
+}
+
+// default and cond share isZero, so both must see the change.
+func TestDefaultAndCond_zeroStruct(t *testing.T) {
+	if got := Default("Draft", time.Time{}); got != "Draft" {
+		t.Errorf("Default(\"Draft\", time.Time{}) = %v, want Draft", got)
+	}
+	if got := Cond(time.Time{}, "yes", "no"); got != "no" {
+		t.Errorf("Cond(time.Time{}, ...) = %v, want no", got)
+	}
+	now := time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC)
+	if got := Default("Draft", now); got != now {
+		t.Errorf("Default(\"Draft\", %v) = %v, want the date", now, got)
+	}
+}
+
 func TestCond(t *testing.T) {
 	cases := []struct {
 		ctrl any

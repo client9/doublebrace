@@ -107,10 +107,20 @@ func fieldFloat(v any, key string) (float64, error) {
 }
 
 // isZero reports whether v is the zero value for its type.
-// nil, false, 0, "", and empty slices/maps are all considered zero.
+// nil, false, 0, "", empty slices/maps, and all-zero arrays/structs are
+// considered zero.
+//
+// A type that defines IsZero() bool decides for itself. That is what makes a
+// zero time.Time report as zero even when it carries a location: t.In(loc) and
+// t.Local() leave the seconds at zero but set the location field, so the struct
+// is no longer all-zero by reflection while time.Time.IsZero still reports true.
+// encoding/json's omitzero resolves this the same way.
 func isZero(v any) bool {
 	if v == nil {
 		return true
+	}
+	if z, ok := v.(interface{ IsZero() bool }); ok {
+		return z.IsZero()
 	}
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
@@ -124,10 +134,16 @@ func isZero(v any) bool {
 		return rv.Float() == 0
 	case reflect.String:
 		return rv.String() == ""
-	case reflect.Slice, reflect.Map, reflect.Array:
+	case reflect.Slice, reflect.Map:
 		return rv.Len() == 0
 	case reflect.Pointer, reflect.Interface:
 		return rv.IsNil()
+	case reflect.Array, reflect.Struct:
+		// Arrays go by zero-ness, not emptiness: an array's length is fixed, so
+		// treating [3]int{} as non-zero because it has three slots would
+		// contradict the definition above. Slices and maps keep emptiness
+		// semantics, where a length of zero is the meaningful test.
+		return rv.IsZero()
 	}
 	return false
 }
@@ -715,11 +731,13 @@ func In(v, val any) (bool, error) {
 }
 
 // Default returns val if it is non-zero, otherwise def.
-// Zero values: nil, false, 0, "", and empty slices/maps.
+// Zero values: nil, false, 0, "", empty slices/maps, and all-zero arrays/structs
+// — including a zero time.Time, so an unset date falls back.
 //
 //	default "anon" ""      → "anon"
 //	default "anon" "Alice" → "Alice"
 //	default 0 42           → 42
+//	default "Draft" $date  → "Draft" when $date is the zero time
 func Default(def, val any) any {
 	if isZero(val) {
 		return def
