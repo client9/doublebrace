@@ -1,6 +1,7 @@
 package doublebrace
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -71,6 +72,96 @@ func TestSeq(t *testing.T) {
 	}
 	if _, err := Seq(1, 10, 0); err == nil {
 		t.Error("Seq(1,10,0): expected error for zero step")
+	}
+}
+
+// seq is bounded so that a mistyped or mis-parsed bound fails fast instead of
+// allocating gigabytes. The limit is on the element count, not the numeric
+// range, so a wide span with a large step is still fine.
+func TestSeq_lengthLimit(t *testing.T) {
+	t.Run("at the limit", func(t *testing.T) {
+		for _, args := range [][]int{
+			{MaxSeqLen},
+			{1, MaxSeqLen},
+			{0, 2*MaxSeqLen - 2, 2},
+		} {
+			got, err := Seq(args...)
+			if err != nil {
+				t.Errorf("Seq(%v): unexpected error: %v", args, err)
+				continue
+			}
+			if len(got) != MaxSeqLen {
+				t.Errorf("Seq(%v) returned %d elements, want %d", args, len(got), MaxSeqLen)
+			}
+		}
+	})
+
+	t.Run("one past the limit", func(t *testing.T) {
+		for _, args := range [][]int{
+			{MaxSeqLen + 1},
+			{1, MaxSeqLen + 1},
+			{0, 2 * MaxSeqLen, 2},
+		} {
+			if got, err := Seq(args...); err == nil {
+				t.Errorf("Seq(%v) returned %d elements, want an error", args, len(got))
+			}
+		}
+	})
+
+	t.Run("wide range with a large step stays under the limit", func(t *testing.T) {
+		got, err := Seq(math.MinInt, math.MaxInt, math.MaxInt)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []int{math.MinInt, -1, math.MaxInt - 1}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("Seq(MinInt, MaxInt, MaxInt) = %v, want %v", got, want)
+		}
+	})
+}
+
+// The element count must be computed in a width that cannot overflow. Before
+// seqLen, end-start+1 wrapped: seq (math.MinInt) (math.MaxInt) computed a count
+// of 0 and silently returned nothing rather than refusing an impossible request.
+func TestSeq_countDoesNotOverflow(t *testing.T) {
+	cases := [][]int{
+		{math.MinInt, math.MaxInt},
+		{math.MinInt, math.MaxInt, 1},
+		{math.MaxInt, math.MinInt, -1},
+		{math.MinInt + 1, math.MaxInt},
+		{0, math.MaxInt},
+		{math.MinInt, 0},
+	}
+	for _, args := range cases {
+		got, err := Seq(args...)
+		if err == nil {
+			t.Errorf("Seq(%v) returned %d elements, want an error", args, len(got))
+		}
+	}
+}
+
+// A step that overflows past end must not restart the loop. The old
+// condition-driven loop appended forever here, because v += step wrapped from
+// MaxInt-1 around to MinInt and satisfied v <= end again.
+func TestSeq_stepOverflowTerminates(t *testing.T) {
+	cases := []struct {
+		args []int
+		want []int
+	}{
+		{[]int{math.MaxInt - 1, math.MaxInt, 2}, []int{math.MaxInt - 1}},
+		{[]int{math.MaxInt - 1, math.MaxInt, math.MaxInt}, []int{math.MaxInt - 1}},
+		{[]int{math.MinInt + 1, math.MinInt, -2}, []int{math.MinInt + 1}},
+		{[]int{math.MinInt, math.MinInt, math.MinInt}, []int{math.MinInt}},
+	}
+	for _, c := range cases {
+		got, err := Seq(c.args...)
+		if err != nil {
+			t.Errorf("Seq(%v): unexpected error: %v", c.args, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("Seq(%v) = %v, want %v", c.args, got, c.want)
+		}
 	}
 }
 

@@ -163,56 +163,86 @@ func Dict(kvs ...any) (map[string]any, error) {
 	return m, nil
 }
 
+// MaxSeqLen is the largest sequence seq will produce. It is a guardrail against
+// a mistyped or mis-parsed bound turning into a multi-gigabyte allocation, not a
+// budget to render against: 10000 iterations already emit far more HTML than any
+// page wants, so no legitimate template should come near it.
+//
+// It is a constant rather than a variable because a mutable global would be
+// shared state in a package built for concurrent template execution. A caller
+// who genuinely needs longer sequences can register their own seq over this one
+// with Merge.
+const MaxSeqLen = 10000
+
+// seqSpan returns the number of steps from start to end — one less than the
+// element count — and whether the sequence has any elements at all.
+//
+// The span is measured in uint64 because end-start overflows int whenever the
+// bounds straddle zero widely enough; that wrap is how seq (math.MinInt)
+// (math.MaxInt) used to compute a count of 0 and silently return nothing. The
+// span is returned rather than the count because the count itself does not
+// always fit either: the full int range holds 2^64 values, one more than uint64
+// can represent. Callers bound the span before adding one.
+func seqSpan(start, end, step int) (uint64, bool) {
+	if step > 0 {
+		if start > end {
+			return 0, false
+		}
+		return (uint64(end) - uint64(start)) / uint64(step), true
+	}
+	if start < end {
+		return 0, false
+	}
+	// -uint64(step) is the magnitude of a negative step, computed in unsigned
+	// arithmetic so that math.MinInt, whose negation overflows int, still works.
+	return (uint64(start) - uint64(end)) / (-uint64(step)), true
+}
+
 // Seq returns a slice of integers. Counting is 1-based by default.
+// The sequence may not exceed MaxSeqLen elements.
 //
 //	seq 5        → [1 2 3 4 5]
 //	seq 3 7      → [3 4 5 6 7]
 //	seq 1 10 2   → [1 3 5 7 9]
 //	seq 5 1 -1   → [5 4 3 2 1]
 func Seq(args ...int) ([]int, error) {
+	var start, end, step int
 	switch len(args) {
 	case 1:
-		n := args[0]
-		if n < 1 {
-			return []int{}, nil
-		}
-		out := make([]int, n)
-		for i := range n {
-			out[i] = i + 1
-		}
-		return out, nil
+		start, end, step = 1, args[0], 1
 	case 2:
-		start, end := args[0], args[1]
-		if start > end {
-			return []int{}, nil
-		}
-		out := make([]int, end-start+1)
-		for i := range out {
-			out[i] = start + i
-		}
-		return out, nil
+		start, end, step = args[0], args[1], 1
 	case 3:
-		start, end, step := args[0], args[1], args[2]
+		start, end, step = args[0], args[1], args[2]
 		if step == 0 {
 			return nil, fmt.Errorf("seq: step cannot be zero")
 		}
-		var out []int
-		if step > 0 {
-			for v := start; v <= end; v += step {
-				out = append(out, v)
-			}
-		} else {
-			for v := start; v >= end; v += step {
-				out = append(out, v)
-			}
-		}
-		if out == nil {
-			return []int{}, nil
-		}
-		return out, nil
 	default:
 		return nil, fmt.Errorf("seq: expected 1–3 arguments, got %d", len(args))
 	}
+
+	span, ok := seqSpan(start, end, step)
+	if !ok {
+		return []int{}, nil
+	}
+	if span >= MaxSeqLen { // element count is span+1
+		// Report the request rather than the resulting length: the length can
+		// exceed uint64, and the arguments are what the author needs to see.
+		return nil, fmt.Errorf("seq: %d to %d by %d exceeds the limit of %d elements",
+			start, end, step, MaxSeqLen)
+	}
+
+	out := make([]int, span+1)
+	v := start
+	for i := range out {
+		out[i] = v
+		// Counting the elements up front rather than testing v against end is
+		// what keeps this terminating: the final increment can overflow past
+		// end and wrap, which turned the old condition-driven loop into an
+		// unbounded one. The wrapped value is never used.
+		v += step
+	}
+	return out, nil
 }
 
 // --- sequence access ---

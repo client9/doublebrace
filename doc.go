@@ -139,6 +139,10 @@
 //   - seq(start, end) []int — integers start..end inclusive
 //   - seq(start, end, step) []int — with step; negative step counts down
 //
+// A sequence may not exceed MaxSeqLen elements; a longer request is an error
+// rather than an allocation. The limit is on the element count, not the numeric
+// range, so a wide span with a large step is fine.
+//
 // # Collections — Sequence Access
 //
 // These functions operate on any slice type or string. String operations are
