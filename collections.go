@@ -42,11 +42,17 @@ func collectionsFuncMap() template.FuncMap {
 
 // --- internal helpers ---
 
-// toSlice converts any slice type to []any. []any is returned directly (fast
-// path); other slice types are expanded via reflection.
+// toSlice converts any slice type to []any. []any is cloned; other slice types
+// are expanded via reflection.
+//
+// The clone is deliberate and load-bearing: collection functions must never
+// mutate or alias their inputs (see the package doc on concurrent template
+// execution), and allocating here is what makes that guarantee hold for every
+// caller rather than depending on each one to remember. The copy is shallow —
+// elements are shared, only the spine is fresh.
 func toSlice(v any) ([]any, error) {
 	if s, ok := v.([]any); ok {
-		return s, nil
+		return slices.Clone(s), nil
 	}
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() || rv.Kind() != reflect.Slice {
@@ -119,7 +125,7 @@ func List(elems ...any) []any {
 	if elems == nil {
 		return []any{}
 	}
-	return elems
+	return slices.Clone(elems)
 }
 
 // Dict creates a map[string]any from alternating key-value arguments.

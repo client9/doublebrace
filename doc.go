@@ -112,6 +112,20 @@
 //   - urlEncode(s) string — percent-encode for query strings; spaces become +
 //   - urlPathEscape(s) string — percent-encode a single path segment; / is encoded too
 //
+// # Collections — Immutability
+//
+// Collection functions always return newly allocated structures and never
+// mutate or alias their arguments. This is a correctness requirement rather
+// than a stylistic one: html/template is safe for concurrent execution, and the
+// common server shape renders one template over shared data from many
+// goroutines at once. A function that modified its input in place would be a
+// data race there, and templates offer no way to express or even notice that a
+// result borrows its argument's memory.
+//
+// The guarantee is shallow. The returned container is fresh, but its elements
+// are shared with the input, so sort $pages yields a new slice holding the same
+// map values. Mutating an element still affects the original.
+//
 // # Collections — Constructors
 //
 //   - list(elems...) []any — create a slice from values: list "a" "b" "c"
