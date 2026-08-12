@@ -11,10 +11,19 @@ func TestToInt(t *testing.T) {
 		in   any
 		want int
 	}{
+		// Every width has its own case in the type switch, so every width needs
+		// its own case here: a missing one is a conversion that compiles and is
+		// never executed until a caller's data happens to arrive as that type.
 		{42, 42},
 		{int8(10), 10},
+		{int16(-300), -300},
+		{int32(70000), 70000},
 		{int64(-5), -5},
 		{uint(3), 3},
+		{uint8(200), 200},
+		{uint16(50000), 50000},
+		{uint32(3000000000), 3000000000},
+		{uint64(7), 7},
 		{float32(3.9), 3},
 		{float64(2.1), 2},
 		{"17", 17},
@@ -168,5 +177,21 @@ func TestToFloat(t *testing.T) {
 
 	if _, err := ToFloat("abc"); err == nil {
 		t.Error("expected error for non-numeric string")
+	}
+}
+
+// ToInt's int64 arm guards against a value too large for an int. On a 64-bit
+// platform int is int64, so the guard cannot fire and coverage cannot reach it;
+// it exists for 32-bit builds, where an int64 from a JSON decoder routinely
+// exceeds 2^31-1. The test is written to run there rather than deleted as dead
+// code, because it is only dead on this architecture.
+func TestToInt_int64OverflowGuardIs32BitOnly(t *testing.T) {
+	if math.MaxInt == math.MaxInt64 {
+		t.Skip("int is 64 bits here; the int64 overflow guard is unreachable by construction")
+	}
+	for _, in := range []int64{math.MaxInt64, math.MinInt64} {
+		if got, err := ToInt(in); err == nil {
+			t.Errorf("ToInt(int64 %d) = %d, want an overflow error", in, got)
+		}
 	}
 }

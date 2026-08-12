@@ -1,6 +1,9 @@
 package doublebrace
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestToFloat64(t *testing.T) {
 	cases := []struct {
@@ -8,11 +11,20 @@ func TestToFloat64(t *testing.T) {
 		want float64
 		ok   bool
 	}{
+		// One case per arm of the type switch. An untested arm is a conversion
+		// that only runs once a caller's decoder happens to produce that type.
 		{int(3), 3.0, true},
+		{int8(-8), -8.0, true},
+		{int16(-300), -300.0, true},
+		{int32(70000), 70000.0, true},
 		{int64(-7), -7.0, true},
+		{uint(4), 4.0, true},
+		{uint8(200), 200.0, true},
+		{uint16(50000), 50000.0, true},
+		{uint32(3000000000), 3000000000.0, true},
+		{uint64(9), 9.0, true},
 		{float32(1.5), 1.5, true},
 		{float64(2.5), 2.5, true},
-		{uint(4), 4.0, true},
 		{"3.14", 3.14, true},
 		{"bad", 0, false},
 		{true, 0, false},
@@ -278,5 +290,80 @@ func TestMinMax_errors(t *testing.T) {
 	}
 	if _, err := Max(true); err == nil {
 		t.Error("Max(true): expected error for unsupported type")
+	}
+}
+
+// A value that cannot be converted must surface as an error from every argument
+// position of every function, not merely the first. Each toFloat64 call site is
+// its own branch: Div checks its divisor after its dividend, Clamp checks three
+// arguments in turn, and min/max convert inside a recursion. A site that
+// silently substituted zero would produce a plausible wrong number instead of a
+// failure, which is the worst outcome available to a template.
+func TestMath_conversionErrorsPropagate(t *testing.T) {
+	const bad = "not a number"
+
+	binary := []struct {
+		name string
+		fn   func(a, b any) (float64, error)
+	}{
+		{"Add", Add}, {"Sub", Sub}, {"Mul", Mul},
+		{"Div", Div}, {"Mod", Mod}, {"Pow", Pow},
+	}
+	for _, c := range binary {
+		if got, err := c.fn(bad, 1); err == nil {
+			t.Errorf("%s(%q, 1) = %v, want an error", c.name, bad, got)
+		}
+		if got, err := c.fn(1, bad); err == nil {
+			t.Errorf("%s(1, %q) = %v, want an error", c.name, bad, got)
+		}
+	}
+
+	unary := []struct {
+		name string
+		fn   func(a any) (float64, error)
+	}{
+		{"Abs", Abs}, {"Ceil", Ceil}, {"Floor", Floor}, {"Round", Round},
+	}
+	for _, c := range unary {
+		if got, err := c.fn(bad); err == nil {
+			t.Errorf("%s(%q) = %v, want an error", c.name, bad, got)
+		}
+	}
+
+	if got, err := ModBool(bad, 2); err == nil {
+		t.Errorf("ModBool(%q, 2) = %v, want an error", bad, got)
+	}
+	if got, err := ModBool(2, bad); err == nil {
+		t.Errorf("ModBool(2, %q) = %v, want an error", bad, got)
+	}
+
+	// Clamp names the argument that failed. The label is worth pinning: with
+	// three numeric arguments, "cannot convert string to float64" alone does not
+	// say which one the template got wrong.
+	for _, c := range []struct {
+		args [3]any
+		want string
+	}{
+		{[3]any{bad, 1, 10}, "clamp: val:"},
+		{[3]any{1, bad, 10}, "clamp: min:"},
+		{[3]any{1, 10, bad}, "clamp: max:"},
+	} {
+		_, err := Clamp(c.args[0], c.args[1], c.args[2])
+		if err == nil {
+			t.Errorf("Clamp%v: expected an error", c.args)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("Clamp%v: error %q, want it to contain %q", c.args, err, c.want)
+		}
+	}
+
+	// min and max flatten nested sequences recursively; an element that fails to
+	// convert must abort the whole call rather than being skipped.
+	if got, err := Min([]any{[]any{bad}}); err == nil {
+		t.Errorf("Min(nested %q) = %v, want an error", bad, got)
+	}
+	if got, err := Max([]any{[]any{bad}}); err == nil {
+		t.Errorf("Max(nested %q) = %v, want an error", bad, got)
 	}
 }
