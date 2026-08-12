@@ -3,6 +3,11 @@ linters:
   enable:
     - godoclint
     - gochecknoinits
+    # Catches a parameter or variable shadowing a predeclared identifier (new,
+    # len, min, cap). It matters most in exported signatures, which render on
+    # pkg.go.dev: see Replace, whose replacement argument is repl for this reason
+    # even though strings.Replace names it new.
+    - predeclared
   exclusions:
     generated: lax
     presets:
