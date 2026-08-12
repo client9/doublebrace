@@ -168,6 +168,11 @@ func Dict(kvs ...any) (map[string]any, error) {
 // budget to render against: 10000 iterations already emit far more HTML than any
 // page wants, so no legitimate template should come near it.
 //
+// Hugo caps its equivalent at 1000000 (https://gohugo.io/functions/collections/seq/).
+// The lower limit here is deliberate: 1000000 bounds the allocation at 8MB but
+// still lets a mistaken bound run a million iterations and emit an unusable
+// page, which is the failure this is meant to catch rather than merely survive.
+//
 // It is a constant rather than a variable because a mutable global would be
 // shared state in a package built for concurrent template execution. A caller
 // who genuinely needs longer sequences can register their own seq over this one
