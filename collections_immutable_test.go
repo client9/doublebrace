@@ -47,8 +47,8 @@ var immutableCases = []struct {
 	{"Drop positive", []any{3, 1, 1, 2}, func(v any) (any, error) { return Drop(v, 2) }},
 	{"Drop negative", []any{3, 1, 1, 2}, func(v any) (any, error) { return Drop(v, -2) }},
 	{"Drop overlong", []any{3, 1, 1, 2}, func(v any) (any, error) { return Drop(v, 99) }},
-	{"Reverse", []any{3, 1, 1, 2}, Reverse},
-	{"Compact", []any{1, 1, 2, 3, 3, 1}, Compact},
+	{"Reverse", []any{3, 1, 1, 2}, func(v any) (any, error) { return Reverse(v) }},
+	{"Compact", []any{1, 1, 2, 3, 3, 1}, func(v any) (any, error) { return Compact(v) }},
 	{"Concat", []any{3, 1, 1, 2}, func(v any) (any, error) { return Concat(v, []any{9}) }},
 	{"Sort numeric", []any{3, 1, 1, 2}, func(v any) (any, error) { return Sort(v) }},
 	{"Sort lexical", []any{"c", "a", "a", "b"}, func(v any) (any, error) { return Sort(v) }},
@@ -143,12 +143,10 @@ func TestImmutabilityIsShallow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := got.([]any)
-
-	if out[0].(map[string]any)["K"] != 1 {
+	if got[0].(map[string]any)["K"] != 1 {
 		t.Fatal("unexpected element value")
 	}
-	out[0].(map[string]any)["K"] = 2
+	got[0].(map[string]any)["K"] = 2
 	if elem["K"] != 2 {
 		t.Error("elements are expected to be shared; update this test if deep copying is added")
 	}

@@ -407,9 +407,8 @@ func TestSort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotSlice := got.([]any)
-	if gotSlice[0].(map[string]any)["Title"] != "Apple" {
-		t.Errorf("sort by key: first element should be Apple, got %v", gotSlice[0])
+	if got[0].(map[string]any)["Title"] != "Apple" {
+		t.Errorf("sort by key: first element should be Apple, got %v", got[0])
 	}
 
 	// []int sorts numerically, not lexicographically
@@ -442,9 +441,8 @@ func TestSort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotTimes := got.([]any)
-	if gotTimes[0].(time.Time) != t2 || gotTimes[1].(time.Time) != t3 || gotTimes[2].(time.Time) != t1 {
-		t.Errorf("sort []time.Time: got %v, want [%v %v %v]", gotTimes, t2, t3, t1)
+	if got[0].(time.Time) != t2 || got[1].(time.Time) != t3 || got[2].(time.Time) != t1 {
+		t.Errorf("sort []time.Time: got %v, want [%v %v %v]", got, t2, t3, t1)
 	}
 
 	// []any with int elements sorts numerically
@@ -462,9 +460,8 @@ func TestSort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotAnyTimes := got.([]any)
-	if gotAnyTimes[0].(time.Time) != t2 {
-		t.Errorf("sort []any time.Time: first should be %v, got %v", t2, gotAnyTimes[0])
+	if got[0].(time.Time) != t2 {
+		t.Errorf("sort []any time.Time: first should be %v, got %v", t2, got[0])
 	}
 }
 
@@ -489,9 +486,8 @@ func TestSortNum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotSlice := got.([]any)
-	if gotSlice[0].(map[string]any)["Year"] != 2018 {
-		t.Errorf("sortNum by key: first should be 2018, got %v", gotSlice[0])
+	if got[0].(map[string]any)["Year"] != 2018 {
+		t.Errorf("sortNum by key: first should be 2018, got %v", got[0])
 	}
 
 	// error on non-numeric value
@@ -512,7 +508,7 @@ func TestWhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(got.([]any)); n != 2 {
+	if n := len(got); n != 2 {
 		t.Errorf("where Draft==false: expected 2, got %d", n)
 	}
 
@@ -521,7 +517,7 @@ func TestWhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(got.([]any)); n != 2 {
+	if n := len(got); n != 2 {
 		t.Errorf("where Section==blog: expected 2, got %d", n)
 	}
 
@@ -530,7 +526,7 @@ func TestWhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(got.([]any)); n != 0 {
+	if n := len(got); n != 0 {
 		t.Errorf("where no match: expected 0, got %d", n)
 	}
 }
@@ -778,8 +774,8 @@ func TestSortNum_emptyInput(t *testing.T) {
 			t.Errorf("SortNum([], %v) = %v, want no error", key, err)
 			continue
 		}
-		if s := got.([]any); len(s) != 0 {
-			t.Errorf("SortNum([], %v) = %v, want empty", key, s)
+		if len(got) != 0 {
+			t.Errorf("SortNum([], %v) = %v, want empty", key, got)
 		}
 	}
 }
@@ -790,8 +786,8 @@ func TestSort_keyMissingOnEmptyInput(t *testing.T) {
 	if err != nil {
 		t.Errorf("Sort([], \"Title\") = %v, want no error", err)
 	}
-	if s := got.([]any); len(s) != 0 {
-		t.Errorf("Sort([], \"Title\") = %v, want empty", s)
+	if len(got) != 0 {
+		t.Errorf("Sort([], \"Title\") = %v, want empty", got)
 	}
 }
 
@@ -1008,8 +1004,8 @@ func TestWhereAndIn_jsonDecodedData(t *testing.T) {
 			t.Errorf("Where(json, \"W\", %v): %v", val, err)
 			continue
 		}
-		if s := got.([]any); len(s) != 1 {
-			t.Errorf("Where(json, \"W\", %v) matched %d, want 1", val, len(s))
+		if len(got) != 1 {
+			t.Errorf("Where(json, \"W\", %v) matched %d, want 1", val, len(got))
 		}
 	}
 
@@ -1054,8 +1050,8 @@ func TestWhere_missingKeyIsAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if s := got.([]any); len(s) != 1 {
-		t.Errorf("Where matched %d, want 1", len(s))
+	if len(got) != 1 {
+		t.Errorf("Where matched %d, want 1", len(got))
 	}
 }
 

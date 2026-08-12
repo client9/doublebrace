@@ -157,6 +157,9 @@
 // These functions operate on any slice, array, or string. String operations are
 // rune-aware: multi-byte characters are never split.
 //
+// They return any, rather than the []any returned elsewhere, because the result
+// follows the input: a string argument yields a string or a rune, not a slice.
+//
 //   - first(v) any — first element of a slice, or first rune of a string
 //   - last(v) any — last element of a slice, or last rune of a string
 //   - take(v, n) any — first n elements of a slice, or first n runes of a string; negative n takes from the end

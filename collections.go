@@ -513,7 +513,7 @@ func Drop(v any, n int) (any, error) {
 // Reverse returns a new slice with the elements in reverse order.
 //
 //	reverse []int{1, 2, 3} → []any{3, 2, 1}
-func Reverse(v any) (any, error) {
+func Reverse(v any) ([]any, error) {
 	out, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("reverse: %w", err)
@@ -527,7 +527,7 @@ func Reverse(v any) (any, error) {
 // semantics. For full deduplication use: compact (sort $list)
 //
 //	compact []int{1, 1, 2, 3, 3, 1} → []any{1, 2, 3, 1}
-func Compact(v any) (any, error) {
+func Compact(v any) ([]any, error) {
 	elems, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("compact: %w", err)
@@ -643,7 +643,7 @@ func inferSortMode(elems []any) sortMode {
 //	sort (list "banana" "apple" "cherry") → ["apple" "banana" "cherry"]
 //	sort (list 10 2 30)                   → [2 10 30]
 //	sort $pages "Title"                   → pages A→Z by Title field
-func Sort(v any, key ...string) (any, error) {
+func Sort(v any, key ...string) ([]any, error) {
 	// toSlice already allocated, so out can be sorted in place.
 	out, err := toSlice(v)
 	if err != nil {
@@ -691,7 +691,7 @@ func Sort(v any, key ...string) (any, error) {
 //
 //	sortNum (list "10" "9" "2") → ["2" "9" "10"]
 //	sortNum $pages "Year"       → pages sorted by Year field, ascending
-func SortNum(v any, key ...string) (any, error) {
+func SortNum(v any, key ...string) ([]any, error) {
 	// toSlice already allocated, so out can be sorted in place.
 	out, err := toSlice(v)
 	if err != nil {
@@ -727,7 +727,7 @@ func SortNum(v any, key ...string) (any, error) {
 //	where $pages "Draft" false    → pages where Draft == false
 //	where $pages "Section" "blog" → pages in the blog section
 //	where $pages "Weight" 1       → matches whether Weight is int, int64, or float64
-func Where(v any, key string, val any) (any, error) {
+func Where(v any, key string, val any) ([]any, error) {
 	elems, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("where: %w", err)

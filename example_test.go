@@ -276,7 +276,7 @@ func ExampleSort_time() {
 	t1 := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
 	t2 := time.Date(2023, 12, 31, 0, 0, 0, 0, time.UTC)
 	v, _ := doublebrace.Sort([]time.Time{t1, t2})
-	fmt.Println(v.([]any)[0].(time.Time).Format("2006-01-02"))
+	fmt.Println(v[0].(time.Time).Format("2006-01-02"))
 	// Output:
 	// 2023-12-31
 }
@@ -295,7 +295,7 @@ func ExampleWhere() {
 		map[string]any{"Title": "Post C", "Draft": false},
 	}
 	v, _ := doublebrace.Where(pages, "Draft", false)
-	fmt.Println(len(v.([]any)))
+	fmt.Println(len(v))
 	// Output:
 	// 2
 }
