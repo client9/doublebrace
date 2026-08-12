@@ -1,8 +1,12 @@
 package doublebrace
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
+	"text/template"
 )
 
 // Collection functions must never mutate or alias their arguments. See the
@@ -149,5 +153,81 @@ func TestImmutabilityIsShallow(t *testing.T) {
 	got[0].(map[string]any)["K"] = 2
 	if elem["K"] != 2 {
 		t.Error("elements are expected to be shared; update this test if deep copying is added")
+	}
+}
+
+// The immutability guarantee exists so that one template can render over shared
+// data from many goroutines at once, which is the shape html/template is built
+// for and the shape a web server produces for free. The tests above establish
+// that no function mutates its input when called once; this one puts real
+// goroutines on the same data so that the race detector has something to
+// observe. Without it `go test -race` proves nothing here, however many
+// immutability assertions accumulate: the detector reports only races that
+// actually occur during a run.
+//
+// Data lives outside the goroutines and is never copied for them: every
+// execution reads the same maps and slices concurrently. A function that sorted
+// its argument in place, or returned a result aliasing it, would be reported
+// here.
+func TestConcurrentTemplateExecution(t *testing.T) {
+	pages := []any{
+		map[string]any{"Title": "Cherry", "Weight": 3, "Draft": false},
+		map[string]any{"Title": "Apple", "Weight": 1, "Draft": false},
+		map[string]any{"Title": "Banana", "Weight": 2, "Draft": true},
+	}
+	site := map[string]any{"Name": "example", "Lang": "en"}
+	data := map[string]any{"Pages": pages, "Site": site, "Tags": []any{"b", "a", "a", "c"}}
+
+	tmpl := template.Must(template.New("page").Funcs(FuncMap()).Parse(
+		`{{ range sort (where .Pages "Draft" false) "Title" }}{{ .Title }},{{ end }}` +
+			`|{{ join (reverse (compact (sort .Tags))) "-" }}` +
+			`|{{ join (keys (merge .Site (dict "Extra" 1))) "," }}` +
+			`|{{ range sortNum .Pages "Weight" }}{{ .Weight }}{{ end }}`,
+	))
+
+	// Rendering once up front both fixes the expected output and proves the
+	// template is well-formed, so a failure below is about concurrency rather
+	// than a typo in the template above.
+	var first strings.Builder
+	if err := tmpl.Execute(&first, data); err != nil {
+		t.Fatalf("initial execute: %v", err)
+	}
+	want := first.String()
+
+	const goroutines, iterations = 8, 50
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines*iterations)
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range iterations {
+				var buf strings.Builder
+				if err := tmpl.Execute(&buf, data); err != nil {
+					errs <- fmt.Errorf("execute: %w", err)
+					continue
+				}
+				if got := buf.String(); got != want {
+					errs <- fmt.Errorf("render mismatch:\n got %q\nwant %q", got, want)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+
+	// The shared data must be exactly as it started. A mutation that happened to
+	// be goroutine-consistent would pass the comparison above but is still a bug.
+	if got := pages[0].(map[string]any)["Title"]; got != "Cherry" {
+		t.Errorf("input reordered by rendering: pages[0].Title = %v, want Cherry", got)
+	}
+	if len(site) != 2 {
+		t.Errorf("merge modified its argument: site has %d keys, want 2", len(site))
+	}
+	if got := data["Tags"].([]any); !reflect.DeepEqual(got, []any{"b", "a", "a", "c"}) {
+		t.Errorf("sort/compact modified the input slice: %v", got)
 	}
 }

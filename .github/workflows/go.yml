@@ -55,3 +55,11 @@ jobs:
 
     - name: Test
       run: make test
+
+    # The immutability guarantee — collection functions never mutate or alias
+    # their arguments — exists so one template can render over shared data from
+    # many goroutines. TestConcurrentTemplateExecution is what puts real
+    # goroutines on that data; this step is what makes a regression in it fail a
+    # pull request rather than wait for someone to run make race by hand.
+    - name: Race
+      run: make race

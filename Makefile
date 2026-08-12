@@ -36,6 +36,13 @@ build: ## build
 test: ## test
 	go test ./...
 
+## The race detector reports only races it observes, so this is worth running
+## because TestConcurrentTemplateExecution renders one template over shared data
+## from several goroutines. Without a test that does that, -race is a slower way
+## to get the same pass.
+race: ## test under the race detector
+	go test -race -count=1 ./...
+
 env: ## mac osx environment
 	brew upgrade
 	brew install golangci-lint
