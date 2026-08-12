@@ -526,13 +526,18 @@ func Reverse(v any) ([]any, error) {
 // Compact removes consecutive duplicate elements, identical to slices.Compact
 // semantics. For full deduplication use: compact (sort $list)
 //
+// Elements compare with the same rule as where and in: numbers are equal when
+// their values are equal, whatever their types, so a 1 decoded as float64 and a
+// 1 written as an int literal are one duplicate rather than two elements.
+//
 //	compact []int{1, 1, 2, 3, 3, 1} → []any{1, 2, 3, 1}
+//	compact []any{1, 1.0, 2}        → []any{1, 2}
 func Compact(v any) ([]any, error) {
 	elems, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("compact: %w", err)
 	}
-	return slices.CompactFunc(elems, reflect.DeepEqual), nil
+	return slices.CompactFunc(elems, valuesEqual), nil
 }
 
 // Concat concatenates multiple slices into a single []any. The result is always

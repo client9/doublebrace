@@ -168,7 +168,7 @@
 // # Collections — Sequence Transformation
 //
 //   - reverse(v) []any — new slice in reverse order
-//   - compact(v) []any — remove consecutive duplicate elements; for full dedup: compact (sort $list)
+//   - compact(v) []any — remove consecutive duplicate elements; numbers compare by value across types; for full dedup: compact (sort $list)
 //   - concat(slices...) []any — concatenate multiple slices into one
 //   - sort(v [, key]) []any — type-aware sort: numeric types sort numerically, time.Time sorts chronologically, everything else sorts lexicographically; for []any the first non-nil element determines mode; key names a field for slice-of-maps (always lexicographic)
 //   - sortNum(v [, key]) []any — numeric sort via float64 conversion; key names a field for slice-of-maps

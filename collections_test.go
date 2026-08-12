@@ -287,6 +287,11 @@ func TestCompact(t *testing.T) {
 		{[]any{"a", "a", "b"}, []any{"a", "b"}},
 		{[]any{1, 2, 3}, []any{1, 2, 3}}, // no dups
 		{[]any{}, []any{}},
+		// Numbers compare by value across types, matching where and in. The
+		// first of a run is the element kept, so the retained 1 is the int.
+		{[]any{1, 1.0, int64(1), 2}, []any{1, 2}},
+		{[]any{1.0, 1, 2.0}, []any{1.0, 2.0}},
+		{[]any{1, 2, 1.0}, []any{1, 2, 1.0}}, // still only consecutive
 	}
 	for _, c := range cases {
 		got, err := Compact(c.in)
