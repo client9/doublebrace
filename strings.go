@@ -65,19 +65,23 @@ func LenRunes(s string) int {
 	return utf8.RuneCountInString(s)
 }
 
-// Replace returns a copy of s with occurrences of old replaced by new.
+// Replace returns a copy of s with occurrences of old replaced by repl.
 // The optional n argument limits the number of replacements; if omitted,
 // only the first occurrence is replaced. Use replaceAll to replace all.
 //
-//	replace "aabbaa" "a" "x"     → "xabbaa"
+// The replacement is named repl, as in regexp, rather than new as in
+// strings.Replace: new is a predeclared identifier, and shadowing it in a
+// signature that appears in godoc is worth avoiding even though the stdlib does.
+//
+//	replace "aabbaa" "a" "x"    → "xabbaa"
 //	replace "aabbaa" "a" "x" 3  → "xxbbxa"
 //	replace "aabbaa" "a" "x" -1 → "xxbbxx"
-func Replace(s, old, new string, n ...int) string {
+func Replace(s, old, repl string, n ...int) string {
 	count := 1
 	if len(n) > 0 {
 		count = n[0]
 	}
-	return strings.Replace(s, old, new, count)
+	return strings.Replace(s, old, repl, count)
 }
 
 // Join concatenates the elements of v, placing sep between them.

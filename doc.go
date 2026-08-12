@@ -45,8 +45,8 @@
 //   - hasPrefix(s, prefix) bool — report whether s begins with prefix (strings.HasPrefix)
 //   - hasSuffix(s, suffix) bool — report whether s ends with suffix (strings.HasSuffix)
 //   - count(s, substr) int — count non-overlapping instances of substr in s; "" counts runes+1 (strings.Count)
-//   - replace(s, old, new [, n]) string — replace first occurrence of old with new; optional n sets limit (-1 replaces all)
-//   - replaceAll(s, old, new) string — replace all occurrences of old with new (strings.ReplaceAll)
+//   - replace(s, old, repl [, n]) string — replace first occurrence of old with repl; optional n sets limit (-1 replaces all)
+//   - replaceAll(s, old, repl) string — replace all occurrences of old with repl (strings.ReplaceAll)
 //   - repeat(s, n) string — return n copies of s concatenated (strings.Repeat)
 //   - split(s, sep) []string — split s into substrings separated by sep (strings.Split)
 //   - join(elems, sep) string — join elements with sep; accepts any slice or array, non-strings via fmt.Sprint
