@@ -1322,6 +1322,97 @@ func TestSortNum_errorsAreNotLengthDependent(t *testing.T) {
 
 // Sort and SortNum sit next to each other and must agree on bad input, since
 // that is how the two drifted apart in the first place.
+// The message has to name what actually went wrong. sortNum's key path used to
+// build a fresh "cannot convert field %q to number" and drop the cause, so six
+// distinct failures — a mistyped key, an unexported field, a nil pointer
+// element, a scalar with no fields, a map with non-string keys, and a field
+// that genuinely is not a number — all reported as the last one. That is worse
+// than a vague message: it names the cause an author already expects from
+// sortNum, so they go and check the field's type while the real problem is the
+// key. Sort and Where propagated fieldValue's message the whole time; this is
+// what sortNum has to match.
+//
+// Nothing asserted any of these strings before, which is how they drifted, so
+// each case pins the fragment that identifies the cause rather than the whole
+// message.
+func TestSortErrors_nameTheCause(t *testing.T) {
+	type page struct {
+		Title string
+		Year  int
+		hits  int //nolint:unused // read via reflect
+	}
+	pages := []any{page{Title: "a", Year: 2}, page{Title: "b", Year: 1}}
+
+	cases := []struct {
+		name string
+		fn   func() ([]any, error)
+		want []string // every fragment must appear
+	}{
+		{"sortNum key not found", func() ([]any, error) { return SortNum(pages, "Nope") },
+			[]string{"sortNum", `"Nope"`, "not found"}},
+		{"sortNum key unexported", func() ([]any, error) { return SortNum(pages, "hits") },
+			[]string{"sortNum", `"hits"`, "unexported"}},
+		{"sortNum key on a scalar", func() ([]any, error) { return SortNum([]any{1, 2}, "Year") },
+			[]string{"sortNum", "not a map or struct", "int"}},
+		{"sortNum key on a nil pointer", func() ([]any, error) { return SortNum([]any{(*page)(nil)}, "Year") },
+			[]string{"sortNum", `"Year"`, "nil"}},
+		{"sortNum key on non-string map keys", func() ([]any, error) { return SortNum([]any{map[int]any{1: 2}}, "Year") },
+			[]string{"sortNum", "want string"}},
+		// The one case the old message was right about still reads correctly,
+		// and now carries the value that failed to parse.
+		{"sortNum key not numeric", func() ([]any, error) { return SortNum(pages, "Title") },
+			[]string{"sortNum", `"Title"`, `"a"`}},
+		{"sortNum keyless", func() ([]any, error) { return SortNum([]any{"abc", 1}) },
+			[]string{"sortNum", "number", `"abc"`}},
+
+		{"sort key not found", func() ([]any, error) { return Sort(pages, "Nope") },
+			[]string{"sort", `"Nope"`, "not found"}},
+		{"sort key unexported", func() ([]any, error) { return Sort(pages, "hits") },
+			[]string{"sort", `"hits"`, "unexported"}},
+		{"sort numeric", func() ([]any, error) { return Sort([]any{1, "abc"}) },
+			[]string{"sort", "number", `"abc"`}},
+		{"sort time", func() ([]any, error) { return Sort([]any{time.Now(), 1}) },
+			[]string{"sort", "time.Time", "int"}},
+	}
+	for _, c := range cases {
+		_, err := c.fn()
+		if err == nil {
+			t.Errorf("%s: expected an error", c.name)
+			continue
+		}
+		for _, frag := range c.want {
+			if !strings.Contains(err.Error(), frag) {
+				t.Errorf("%s: message %q does not mention %s", c.name, err, frag)
+			}
+		}
+	}
+}
+
+// The key is named once, not twice. fieldValue writes it into the lookup error
+// and fieldNumber into the conversion error, so the caller wraps with a bare
+// prefix; a caller that added the key back produced sort: key "N": field "N"
+// not found.
+func TestSortErrors_doNotRepeatTheKey(t *testing.T) {
+	in := []any{map[string]any{"Other": 1}}
+
+	for _, c := range []struct {
+		name string
+		fn   func() ([]any, error)
+	}{
+		{"Sort", func() ([]any, error) { return Sort(in, "N") }},
+		{"SortNum", func() ([]any, error) { return SortNum(in, "N") }},
+	} {
+		_, err := c.fn()
+		if err == nil {
+			t.Errorf("%s: expected an error", c.name)
+			continue
+		}
+		if n := strings.Count(err.Error(), `"N"`); n != 1 {
+			t.Errorf("%s: key appears %d times in %q, want once", c.name, n, err)
+		}
+	}
+}
+
 func TestSortAndSortNum_agreeOnBadInput(t *testing.T) {
 	// A struct with the key is valid for both now, so bad input is a struct
 	// without it. Single element: the case that used to differ.

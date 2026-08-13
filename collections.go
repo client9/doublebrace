@@ -190,12 +190,21 @@ func fieldString(v any, key string) (string, error) {
 
 // fieldNumber returns the numeric value of a named field in a collection
 // element, ready for number.compare.
+//
+// The lookup error is returned as fieldValue wrote it, which already names the
+// key; only the conversion error needs the key added. Naming it in exactly one
+// place is what lets the callers wrap with a bare "sortNum: %w" and still say
+// which field failed, without the key appearing twice on one line.
 func fieldNumber(v any, key string) (number, error) {
 	val, err := fieldValue(v, key)
 	if err != nil {
 		return number{}, err
 	}
-	return toNumber(val)
+	n, err := toNumber(val)
+	if err != nil {
+		return number{}, fmt.Errorf("field %q: %w", key, err)
+	}
+	return n, nil
 }
 
 // toNumber converts a value to a number for sorting.
@@ -882,7 +891,7 @@ func Sort(v any, key ...string) ([]any, error) {
 		return sortByKey(out, func(e any) (string, error) {
 			s, err := fieldString(e, k)
 			if err != nil {
-				return "", fmt.Errorf("sort: key %q: %w", k, err)
+				return "", fmt.Errorf("sort: %w", err)
 			}
 			return s, nil
 		}, cmp.Compare[string])
@@ -892,7 +901,7 @@ func Sort(v any, key ...string) ([]any, error) {
 		return sortByKey(out, func(e any) (number, error) {
 			n, err := toNumber(e)
 			if err != nil {
-				return number{}, errors.New("sort: cannot convert element to number")
+				return number{}, fmt.Errorf("sort: cannot convert element to number: %w", err)
 			}
 			return n, nil
 		}, number.compare)
@@ -900,7 +909,7 @@ func Sort(v any, key ...string) ([]any, error) {
 		return sortByKey(out, func(e any) (time.Time, error) {
 			t, ok := e.(time.Time)
 			if !ok {
-				return time.Time{}, errors.New("sort: element is not time.Time")
+				return time.Time{}, fmt.Errorf("sort: element is not time.Time, got %T", e)
 			}
 			return t, nil
 		}, time.Time.Compare)
@@ -934,7 +943,7 @@ func SortNum(v any, key ...string) ([]any, error) {
 		return sortByKey(out, func(e any) (number, error) {
 			n, err := fieldNumber(e, k)
 			if err != nil {
-				return number{}, fmt.Errorf("sortNum: cannot convert field %q to number", k)
+				return number{}, fmt.Errorf("sortNum: %w", err)
 			}
 			return n, nil
 		}, number.compare)
@@ -942,7 +951,7 @@ func SortNum(v any, key ...string) ([]any, error) {
 	return sortByKey(out, func(e any) (number, error) {
 		n, err := toNumber(e)
 		if err != nil {
-			return number{}, errors.New("sortNum: cannot convert value to number")
+			return number{}, fmt.Errorf("sortNum: cannot convert element to number: %w", err)
 		}
 		return n, nil
 	}, number.compare)
