@@ -1215,6 +1215,64 @@ type article struct {
 // only, so a plain []Page — the shape the doc examples read as though they
 // accept — could not be filtered or sorted at all. Structs, pointers to them,
 // and maps with any string-kind key now work the same way.
+// stringKeyedMap validates and returns a bare error; keys, values, and merge
+// each name themselves. That moved the message from one place to three, and
+// merge's is the reason: it is the only one with an argument index to report,
+// and formatting one eagerly to hand the helper built that string on every
+// successful call.
+func TestMapOps_errorsNameTheCaller(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		fn   func() (any, error)
+		want string
+	}{
+		{"keys non-map", func() (any, error) { return Keys(42) },
+			"keys: expected a map, got int"},
+		{"keys nil", func() (any, error) { return Keys(nil) },
+			"keys: expected a map, got <nil>"},
+		{"keys int-keyed", func() (any, error) { return Keys(map[int]any{1: 2}) },
+			"keys: map has int keys, want string"},
+		{"values non-map", func() (any, error) { return Values(42) },
+			"values: expected a map, got int"},
+		{"values int-keyed", func() (any, error) { return Values(map[int]any{1: 2}) },
+			"values: map has int keys, want string"},
+		{"merge non-map", func() (any, error) { return MergeMaps(map[string]any{"a": 1}, 42) },
+			"merge: argument 1: expected a map, got int"},
+		{"merge int-keyed", func() (any, error) {
+			return MergeMaps(map[string]any{"a": 1}, map[int]any{1: 2})
+		}, "merge: argument 1: map has int keys, want string"},
+	} {
+		_, err := c.fn()
+		if err == nil {
+			t.Errorf("%s: expected an error", c.name)
+			continue
+		}
+		if err.Error() != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, err, c.want)
+		}
+	}
+}
+
+// merge writes every key into a map, so the order its arguments are walked in
+// cannot be observed — which is what lets it range the map rather than sort the
+// keys first. The result must be identical however the runtime happens to
+// iterate, so this runs it enough times to catch an order-dependent answer.
+func TestMergeMaps_isOrderIndependent(t *testing.T) {
+	a := map[string]int{"a": 1, "b": 2, "c": 3, "d": 4}
+	b := map[string]string{"c": "x", "e": "y"}
+	want := map[string]any{"a": 1, "b": 2, "c": "x", "d": 4, "e": "y"}
+
+	for range 100 {
+		got, err := MergeMaps(a, b)
+		if err != nil {
+			t.Fatalf("MergeMaps: %v", err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("MergeMaps = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestFieldAccess_structsAndTypedMaps(t *testing.T) {
 	articles := []article{
 		{meta{"blog"}, "Cherry", 2022, false, "x"},

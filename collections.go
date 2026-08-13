@@ -1084,8 +1084,7 @@ func Where(v any, key string, val any) ([]any, error) {
 
 // --- map operations ---
 
-// stringKeyedMap returns the reflect value of a map with string-kind keys,
-// along with its sorted keys.
+// stringKeyedMap returns the reflect value of a map with string-kind keys.
 //
 // Any value type is accepted — map[string]string and map[string]int are as
 // ordinary in template data as map[string]any — and so is a named key type
@@ -1097,21 +1096,43 @@ func Where(v any, key string, val any) ([]any, error) {
 // to put the keys in an order, and there is no ordering rule here that spans
 // kinds. Widening that means deciding how an int key sorts against a string one,
 // and changing what Keys returns.
-func stringKeyedMap(v any, what string) (reflect.Value, []string, error) {
+//
+// It validates and nothing more. Ordering belongs to the two callers that need
+// it, because merge does not: it writes every key into a map, where the order
+// they arrive in cannot be observed, and used to pay for a sort to produce it.
+// The error is returned unprefixed, so each caller names itself — merge is the
+// reason, since only it has an argument index to report, and formatting one
+// eagerly to pass in meant building that string on every successful call.
+func stringKeyedMap(v any) (reflect.Value, error) {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() || rv.Kind() != reflect.Map {
-		return reflect.Value{}, nil, fmt.Errorf("%s: expected a map, got %T", what, v)
+		return reflect.Value{}, fmt.Errorf("expected a map, got %T", v)
 	}
 	if kt := rv.Type().Key(); kt.Kind() != reflect.String {
-		return reflect.Value{}, nil, fmt.Errorf("%s: map has %s keys, want string", what, kt)
+		return reflect.Value{}, fmt.Errorf("map has %s keys, want string", kt)
 	}
-	// Always non-nil: an empty map must yield an empty slice, not nil.
-	keys := make([]string, 0, rv.Len())
-	for _, k := range rv.MapKeys() {
-		keys = append(keys, k.String())
-	}
-	slices.Sort(keys)
-	return rv, keys, nil
+	return rv, nil
+}
+
+// sortedMapKeys returns rv's keys in order, as reflect values, for a caller
+// that has to look each one up again.
+//
+// Keeping the reflect values is what lets Values index the map with a key
+// directly. Handing back a []string meant converting each one back —
+// reflect.ValueOf(k).Convert(kt) — to reach the entry it had just come from,
+// once per key, for a map this function had already walked.
+//
+// It costs a String call per comparison rather than per key, which is why Keys
+// does not use it: that one wants the names themselves, so it sorts them as
+// strings and never pays to look anything up.
+//
+// reflect.Value.MapKeys allocates its result, so this is never nil.
+func sortedMapKeys(rv reflect.Value) []reflect.Value {
+	keys := rv.MapKeys()
+	slices.SortFunc(keys, func(a, b reflect.Value) int {
+		return cmp.Compare(a.String(), b.String())
+	})
+	return keys
 }
 
 // Keys returns the keys of a map in sorted order. The map may have any value
@@ -1129,11 +1150,22 @@ func Keys(v any) ([]string, error) {
 		}
 		return slices.Sorted(maps.Keys(m)), nil
 	}
-	_, keys, err := stringKeyedMap(v, "keys")
+	rv, err := stringKeyedMap(v)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("keys: %w", err)
 	}
-	return keys, nil
+	// Sorted as strings, not through sortedMapKeys. Keys wants the names and
+	// nothing else, so extracting them first costs one String call per key,
+	// where sorting the reflect values costs one per comparison — measurably
+	// slower for the only caller that has no use for the reflect key.
+	// make, not append to nil: an empty map must yield an empty slice.
+	mk := rv.MapKeys()
+	out := make([]string, len(mk))
+	for i, k := range mk {
+		out[i] = k.String()
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // Values returns the values of a map in key-sorted order. The map may have any
@@ -1149,14 +1181,14 @@ func Values(v any) ([]any, error) {
 		}
 		return out, nil
 	}
-	rv, keys, err := stringKeyedMap(v, "values")
+	rv, err := stringKeyedMap(v)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("values: %w", err)
 	}
-	kt := rv.Type().Key()
+	keys := sortedMapKeys(rv)
 	out := make([]any, len(keys))
 	for i, k := range keys {
-		out[i] = rv.MapIndex(reflect.ValueOf(k).Convert(kt)).Interface()
+		out[i] = rv.MapIndex(k).Interface()
 	}
 	return out, nil
 }
@@ -1177,13 +1209,14 @@ func MergeMaps(mapsIn ...any) (map[string]any, error) {
 			maps.Copy(out, m)
 			continue
 		}
-		rv, keys, err := stringKeyedMap(v, fmt.Sprintf("merge: argument %d", i))
+		rv, err := stringKeyedMap(v)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("merge: argument %d: %w", i, err)
 		}
-		kt := rv.Type().Key()
-		for _, k := range keys {
-			out[k] = rv.MapIndex(reflect.ValueOf(k).Convert(kt)).Interface()
+		// Ranged rather than keyed: the result is a map, so the order these
+		// arrive in cannot be observed, and no key slice needs to exist.
+		for iter := rv.MapRange(); iter.Next(); {
+			out[iter.Key().String()] = iter.Value().Interface()
 		}
 	}
 	return out, nil
