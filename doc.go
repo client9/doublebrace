@@ -171,12 +171,18 @@
 //   - compact(v) []any — remove consecutive duplicate elements; numbers compare by value across types; for full dedup: compact (sort $list)
 //   - concat(slices...) []any — concatenate multiple slices into one
 //   - sort(v [, key]) []any — type-aware sort: numeric types sort numerically, time.Time sorts chronologically, everything else sorts lexicographically; for []any the first non-nil element determines mode; key names a field for slice-of-maps (always lexicographic)
-//   - sortNum(v [, key]) []any — numeric sort via float64 conversion; key names a field for slice-of-maps
+//   - sortNum(v [, key]) []any — numeric sort, including numeric strings; key names a field for slice-of-maps
 //   - where(v, key, val) []any — filter slice of map[string]any where element[key] equals val; numbers compare by value across types; a missing field is an error
 //
 // For descending order compose with reverse: reverse (sort $pages "Title")
 //
 // ISO 8601 date strings ("2006-01-02") sort correctly with lexicographic order.
+//
+// Numeric ordering is exact at every magnitude. Integers wider than a float64's
+// 53-bit mantissa — database IDs and timestamps in nanoseconds, most often —
+// order by their real values rather than collapsing into ties. A numeric string
+// is the exception: parsing it produces a float64, and that is where its
+// precision stops.
 //
 // # Collections — Map Operations
 //

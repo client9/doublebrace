@@ -510,6 +510,152 @@ func TestSort_namedNumericTypes(t *testing.T) {
 	}
 }
 
+// Integers above 2^53 have no distinct float64, so extracting sort keys through
+// toFloat64 made neighbouring IDs compare equal. slices.SortStableFunc then left
+// them in input order and returned no error: unsorted output reported as
+// success. Both sort and sortNum went through that path.
+func TestSortExactAboveFloat64Mantissa(t *testing.T) {
+	const (
+		a = int64(9007199254740992) // 2^53
+		b = int64(9007199254740993) // 2^53+1, no float64 of its own
+		c = int64(9007199254740995)
+	)
+	cases := []struct {
+		name string
+		fn   func(any, ...string) ([]any, error)
+	}{
+		{"Sort", Sort},
+		{"SortNum", SortNum},
+	}
+	for _, tc := range cases {
+		got, err := tc.fn([]int64{c, a, b})
+		if err != nil {
+			t.Errorf("%s int64: %v", tc.name, err)
+			continue
+		}
+		if want := []any{a, b, c}; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s int64: got %v, want %v", tc.name, got, want)
+		}
+
+		// uint64 above int64's range: the largest values a template can carry.
+		const (
+			u1 = uint64(math.MaxUint64 - 1)
+			u2 = uint64(math.MaxUint64)
+		)
+		gotU, err := tc.fn([]uint64{u2, u1})
+		if err != nil {
+			t.Errorf("%s uint64: %v", tc.name, err)
+			continue
+		}
+		if want := []any{u1, u2}; !reflect.DeepEqual(gotU, want) {
+			t.Errorf("%s uint64: got %v, want %v", tc.name, gotU, want)
+		}
+	}
+
+	// Same values reached through a map field, which has its own key extractor.
+	pages := []any{
+		map[string]any{"ID": c},
+		map[string]any{"ID": a},
+		map[string]any{"ID": b},
+	}
+	got, err := SortNum(pages, "ID")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []int64{a, b, c} {
+		if id := got[i].(map[string]any)["ID"]; id != any(want) {
+			t.Errorf("SortNum key: position %d = %v, want %v", i, id, want)
+		}
+	}
+}
+
+// The mixed-kind arms of number.compare are only reachable when one element is
+// an integer and another a float, which is ordinary for decoded data.
+func TestSortMixedKinds(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []any
+		want []any
+	}{
+		{"int and float", []any{3, 1.5, 2}, []any{1.5, 2, 3}},
+		{"float first", []any{1.5, 3, 2}, []any{1.5, 2, 3}},
+		{"negative int and uint", []any{uint(2), -3, 0}, []any{-3, 0, uint(2)}},
+		{"uint and float", []any{uint64(2), 1.5, uint64(1)}, []any{uint64(1), 1.5, uint64(2)}},
+		{"int equals float", []any{2.0, 1, 2}, []any{1, 2.0, 2}}, // stable: 2.0 kept before 2
+		{"fraction breaks tie", []any{2.5, 2, 1.5}, []any{1.5, 2, 2.5}},
+		{"negative fraction", []any{-2.5, -2, -3}, []any{-3, -2.5, -2}},
+		// A float beyond the integer's range must not wrap when narrowed.
+		{"huge float", []any{1e300, int64(math.MaxInt64), -1e300}, []any{-1e300, int64(math.MaxInt64), 1e300}},
+		{"huge float and uint", []any{1e300, uint64(math.MaxUint64), -1e300}, []any{-1e300, uint64(math.MaxUint64), 1e300}},
+		{"infinities", []any{math.Inf(1), 0, math.Inf(-1)}, []any{math.Inf(-1), 0, math.Inf(1)}},
+		// Numeric strings still convert, as they did when every key was a float64.
+		{"numeric string", []any{3, "1", 2}, []any{"1", 2, 3}},
+	}
+	for _, c := range cases {
+		got, err := Sort(c.in)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+
+	// NaN sorts before every number, as cmp.Compare orders it. Signed and
+	// unsigned reach it through different arms of compare, so both are checked.
+	for _, in := range [][]any{
+		{1, math.NaN(), -1},
+		{uint64(1), math.NaN(), uint64(2)},
+	} {
+		got, err := Sort(in)
+		if err != nil {
+			t.Errorf("NaN in %v: %v", in, err)
+			continue
+		}
+		if f, ok := got[0].(float64); !ok || !math.IsNaN(f) {
+			t.Errorf("NaN in %v: got %v, want NaN first", in, got)
+		}
+	}
+
+	// The one place compare and equal are meant to disagree: == says NaN is not
+	// itself, but a sort needs a total order and cannot leave an element
+	// unplaced. TestNumberCompareAgreesWithEqual excludes NaN for this reason,
+	// so the exception is asserted here rather than merely omitted there.
+	nan := asNumber(math.NaN())
+	if nan.equal(nan) {
+		t.Error("equal(NaN, NaN): got true, want false")
+	}
+	if c := nan.compare(nan); c != 0 {
+		t.Errorf("compare(NaN, NaN) = %d, want 0", c)
+	}
+}
+
+// compare must agree with equal wherever equal reports true, and must be a
+// consistent ordering — otherwise sort and where disagree about the same pair.
+func TestNumberCompareAgreesWithEqual(t *testing.T) {
+	vals := []any{
+		-1, 0, 1, 2, int8(1), int64(-1), int64(math.MaxInt64), int64(math.MinInt64),
+		uint(0), uint(1), uint64(math.MaxUint64), uint64(math.MaxInt64),
+		-1.5, 0.0, 1.0, 1.5, 2.0, float32(1.5),
+		9007199254740992.0, int64(9007199254740993),
+		math.Inf(1), math.Inf(-1),
+	}
+	for _, a := range vals {
+		for _, b := range vals {
+			na, nb := asNumber(a), asNumber(b)
+			gotCmp := na.compare(nb)
+			if eq := na.equal(nb); eq != (gotCmp == 0) {
+				t.Errorf("(%v %T, %v %T): equal=%v but compare=%d", a, a, b, b, eq, gotCmp)
+			}
+			// Antisymmetry: reversing the operands negates the result.
+			if rev := nb.compare(na); rev != -gotCmp {
+				t.Errorf("(%v %T, %v %T): compare=%d but reversed=%d", a, a, b, b, gotCmp, rev)
+			}
+		}
+	}
+}
+
 func TestSortNum(t *testing.T) {
 	// numeric strings
 	got, err := SortNum([]string{"10", "9", "2"})

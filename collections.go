@@ -105,17 +105,36 @@ func fieldString(v any, key string) (string, error) {
 	return fmt.Sprint(val), nil
 }
 
-// fieldFloat returns the float64 value of a named field in a map[string]any element.
-func fieldFloat(v any, key string) (float64, error) {
+// fieldNumber returns the numeric value of a named field in a map[string]any
+// element, ready for number.compare.
+func fieldNumber(v any, key string) (number, error) {
 	m, ok := v.(map[string]any)
 	if !ok {
-		return 0, fmt.Errorf("element is not map[string]any, got %T", v)
+		return number{}, fmt.Errorf("element is not map[string]any, got %T", v)
 	}
 	val, exists := m[key]
 	if !exists {
-		return 0, fmt.Errorf("field %q not found", key)
+		return number{}, fmt.Errorf("field %q not found", key)
 	}
-	return toFloat64(val)
+	return toNumber(val)
+}
+
+// toNumber converts a value to a number for sorting.
+//
+// A value of numeric kind keeps its own representation, so int64 and uint64 sort
+// exactly rather than through float64. Anything else — a numeric string, which
+// is what sortNum exists for — falls back to toFloat64 and is float-limited, as
+// it necessarily is: the precision was already spent by the time a number was
+// written down as text.
+func toNumber(v any) (number, error) {
+	if n := asNumber(v); n.kind != notNumeric {
+		return n, nil
+	}
+	f, err := toFloat64(v)
+	if err != nil {
+		return number{}, err
+	}
+	return number{kind: numFloat, f: f}, nil
 }
 
 // numKind classifies a value's numeric representation. The ordering matters:
@@ -208,6 +227,86 @@ func (a number) equal(b number) bool {
 	default: // both float
 		return a.f == b.f
 	}
+}
+
+// compare orders two numbers across kinds, returning -1, 0, or +1 as a is less
+// than, equal to, or greater than b.
+//
+// NaN sorts before every number and ties with itself, as cmp.Compare defines it.
+// That is the one place compare and equal disagree — equal reports NaN != NaN,
+// following ==, while a sort needs a total order and cannot leave an element
+// unplaced. Everywhere else a compare of 0 and an equal of true coincide.
+//
+// Ordering is exact at every magnitude, for the reason equal is: widening both
+// sides to float64 collapses integers above 2^53, so 9007199254740992 and
+// 9007199254740993 compare equal and a stable sort leaves them in input order —
+// unsorted output reported as success. Only an int64 or uint64 can meet a
+// float64 here, and those two pairs are decided by narrowing the float, which is
+// exact at every magnitude.
+func (a number) compare(b number) int {
+	if a.kind > b.kind {
+		return -b.compare(a) // canonical order, so each kind pair appears once
+	}
+	switch {
+	case a.kind == numInt && b.kind == numInt:
+		return cmp.Compare(a.i, b.i)
+	case a.kind == numInt && b.kind == numUint:
+		if a.i < 0 {
+			return -1 // no uint64 is negative
+		}
+		return cmp.Compare(uint64(a.i), b.u)
+	case a.kind == numInt && b.kind == numFloat:
+		return -compareFloatInt64(b.f, a.i)
+	case a.kind == numUint && b.kind == numUint:
+		return cmp.Compare(a.u, b.u)
+	case a.kind == numUint && b.kind == numFloat:
+		return -compareFloatUint64(b.f, a.u)
+	default: // both float
+		return cmp.Compare(a.f, b.f)
+	}
+}
+
+// compareFloatInt64 orders f against i without widening i to a float.
+//
+// Once f is known to be inside int64's range, truncating it splits the
+// comparison into an exact integer one and a fractional tiebreak. Truncation is
+// toward zero, so a negative f carries a negative fraction and the tiebreak
+// reads the same way in both directions.
+func compareFloatInt64(f float64, i int64) int {
+	switch {
+	case math.IsNaN(f):
+		return -1
+	// -float64(math.MinInt64) is 2^63, one past the largest int64 and exactly
+	// representable; math.MinInt64 itself is exactly representable. Infinities
+	// land here too.
+	case f >= -float64(math.MinInt64):
+		return 1
+	case f < float64(math.MinInt64):
+		return -1
+	}
+	trunc := math.Trunc(f)
+	if ti := int64(trunc); ti != i {
+		return cmp.Compare(ti, i)
+	}
+	return cmp.Compare(f-trunc, 0)
+}
+
+// compareFloatUint64 is compareFloatInt64 for the unsigned range.
+func compareFloatUint64(f float64, u uint64) int {
+	const twoPow64 = float64(1<<63) * 2 // one past the largest uint64
+	switch {
+	case math.IsNaN(f):
+		return -1
+	case f < 0:
+		return -1 // no uint64 is negative
+	case f >= twoPow64:
+		return 1
+	}
+	trunc := math.Trunc(f)
+	if tu := uint64(trunc); tu != u {
+		return cmp.Compare(tu, u)
+	}
+	return cmp.Compare(f-trunc, 0)
 }
 
 // valuesEqual reports whether a and b are equal for filtering and membership
@@ -654,6 +753,9 @@ func inferSortMode(elems []any) sortMode {
 // For descending order, compose with reverse.
 // ISO 8601 date strings ("2006-01-02") sort correctly lexicographically.
 //
+// Numeric ordering is exact at every magnitude, including int64 and uint64
+// values above 2^53, which a float64 cannot tell apart.
+//
 //	sort (list "banana" "apple" "cherry") → ["apple" "banana" "cherry"]
 //	sort (list 10 2 30)                   → [2 10 30]
 //	sort $pages "Title"                   → pages A→Z by Title field
@@ -675,13 +777,13 @@ func Sort(v any, key ...string) ([]any, error) {
 	}
 	switch inferSortMode(out) {
 	case sortNumeric:
-		return sortByKey(out, func(e any) (float64, error) {
-			f, err := toFloat64(e)
+		return sortByKey(out, func(e any) (number, error) {
+			n, err := toNumber(e)
 			if err != nil {
-				return 0, errors.New("sort: cannot convert element to number")
+				return number{}, errors.New("sort: cannot convert element to number")
 			}
-			return f, nil
-		}, cmp.Compare[float64])
+			return n, nil
+		}, number.compare)
 	case sortTime:
 		return sortByKey(out, func(e any) (time.Time, error) {
 			t, ok := e.(time.Time)
@@ -697,11 +799,15 @@ func Sort(v any, key ...string) ([]any, error) {
 	}
 }
 
-// SortNum returns a new slice sorted numerically using toFloat64 conversion.
+// SortNum returns a new slice sorted numerically, converting each element to a
+// number — so numeric strings sort by value rather than as text.
 // An optional key names a field for slice-of-maps sorting. It is an error if any
 // element cannot be converted, or — with a key — is not a map[string]any or lacks
 // that key.
 // For descending order, compose with reverse.
+//
+// Values that are already numeric are ordered exactly, whatever their width; a
+// numeric string is parsed as a float64 and so carries that type's precision.
 //
 //	sortNum (list "10" "9" "2") → ["2" "9" "10"]
 //	sortNum $pages "Year"       → pages sorted by Year field, ascending
@@ -713,21 +819,21 @@ func SortNum(v any, key ...string) ([]any, error) {
 	}
 	if len(key) > 0 {
 		k := key[0]
-		return sortByKey(out, func(e any) (float64, error) {
-			f, err := fieldFloat(e, k)
+		return sortByKey(out, func(e any) (number, error) {
+			n, err := fieldNumber(e, k)
 			if err != nil {
-				return 0, fmt.Errorf("sortNum: cannot convert field %q to number", k)
+				return number{}, fmt.Errorf("sortNum: cannot convert field %q to number", k)
 			}
-			return f, nil
-		}, cmp.Compare[float64])
+			return n, nil
+		}, number.compare)
 	}
-	return sortByKey(out, func(e any) (float64, error) {
-		f, err := toFloat64(e)
+	return sortByKey(out, func(e any) (number, error) {
+		n, err := toNumber(e)
 		if err != nil {
-			return 0, errors.New("sortNum: cannot convert value to number")
+			return number{}, errors.New("sortNum: cannot convert value to number")
 		}
-		return f, nil
-	}, cmp.Compare[float64])
+		return n, nil
+	}, number.compare)
 }
 
 // Where filters a slice of map[string]any by field equality.
