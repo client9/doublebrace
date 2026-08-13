@@ -77,7 +77,12 @@
 //
 // # Encoding
 //
-//   - jsonify(v) string — marshal v to JSON; useful for <script> data blocks
+//   - jsonify(v) string — marshal v to JSON; for text/template output and html/template data attributes
+//
+// Inside a <script> block, use the bare action instead: html/template already
+// marshals data to JSON there, whereas jsonify's plain string is escaped into a
+// JavaScript string literal, giving a string that holds JSON rather than an
+// object. See Jsonify for the details and for the already-encoded case.
 //
 // # Cast
 //

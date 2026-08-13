@@ -3,6 +3,7 @@ package doublebrace_test
 import (
 	"fmt"
 	"html/template"
+	"os"
 	"time"
 
 	"github.com/client9/doublebrace"
@@ -537,6 +538,30 @@ func ExampleJsonify_slice() {
 	fmt.Println(v)
 	// Output:
 	// ["a","b","c"]
+}
+
+// A data attribute is where jsonify earns its place in html/template: the bare
+// action would render Go's map notation, and the escaping the attribute needs is
+// applied on the way out, so JSON.parse recovers the value exactly.
+func ExampleJsonify_dataAttribute() {
+	t := template.Must(template.New("page").
+		Funcs(template.FuncMap(doublebrace.FuncMap())).
+		Parse(`<div data-page="{{ jsonify . }}"></div>`))
+	_ = t.Execute(os.Stdout, map[string]any{"n": 1})
+	// Output:
+	// <div data-page="{&#34;n&#34;:1}"></div>
+}
+
+// Inside <script>, jsonify is the wrong tool: html/template marshals data to
+// JSON there on its own, while jsonify's plain string is escaped into a
+// JavaScript string literal — a string holding JSON rather than an object.
+func ExampleJsonify_scriptBlock() {
+	t := template.Must(template.New("page").
+		Funcs(template.FuncMap(doublebrace.FuncMap())).
+		Parse(`<script>var a = {{ . }}; var b = {{ jsonify . }};</script>`))
+	_ = t.Execute(os.Stdout, map[string]any{"n": 1})
+	// Output:
+	// <script>var a = {"n":1}; var b = "{\"n\":1}";</script>
 }
 
 // ---- cast ----
