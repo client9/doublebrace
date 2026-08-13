@@ -46,3 +46,7 @@ race: ## test under the race detector
 env: ## mac osx environment
 	brew upgrade
 	brew install golangci-lint
+
+clean: ## remove any generated files
+	rm -f *.out
+	go clean -testcache
