@@ -416,37 +416,37 @@ func valuesEqual(a, b any) bool {
 // t.Local() leave the seconds at zero but set the location field, so the struct
 // is no longer all-zero by reflection while time.Time.IsZero still reports true.
 // encoding/json's omitzero resolves this the same way.
+//
+// Everything else defers to reflect.Value.IsZero, which is already the "zero
+// value for its type" test this documents — spelling out a case per kind only
+// created kinds to forget, and the ones forgotten (a nil chan, a nil func) fell
+// through to a bare "not zero". Slices and maps are the one deliberate
+// departure: there, emptiness is the meaningful question, so a non-nil empty
+// slice is zero here though reflect says otherwise. Arrays keep zero-ness,
+// because an array's length is fixed and an emptiness test would mean [3]int{}
+// could never be zero.
 func isZero(v any) bool {
 	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	// A nil pointer has to be settled before the IsZero method call below, not
+	// merely by the reflect fallback at the end. A value-receiver IsZero is
+	// promoted into the pointer type's method set, so (*time.Time)(nil) satisfies
+	// the interface and calling the method dereferences the nil pointer. An
+	// optional date carried as a *time.Time is exactly the shape default exists
+	// for, so the panic is reachable from ordinary template data:
+	// {{ default "TBD" .Date }} failed the whole render rather than falling back.
+	if rv.Kind() == reflect.Pointer && rv.IsNil() {
 		return true
 	}
 	if z, ok := v.(interface{ IsZero() bool }); ok {
 		return z.IsZero()
 	}
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Bool:
-		return !rv.Bool()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return rv.Int() == 0
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return rv.Uint() == 0
-	case reflect.Float32, reflect.Float64:
-		return rv.Float() == 0
-	case reflect.String:
-		return rv.String() == ""
-	case reflect.Slice, reflect.Map:
+	if k := rv.Kind(); k == reflect.Slice || k == reflect.Map {
 		return rv.Len() == 0
-	case reflect.Pointer, reflect.Interface:
-		return rv.IsNil()
-	case reflect.Array, reflect.Struct:
-		// Arrays go by zero-ness, not emptiness: an array's length is fixed, so
-		// treating [3]int{} as non-zero because it has three slots would
-		// contradict the definition above. Slices and maps keep emptiness
-		// semantics, where a length of zero is the meaningful test.
-		return rv.IsZero()
 	}
-	return false
+	return rv.IsZero()
 }
 
 // --- constructors ---

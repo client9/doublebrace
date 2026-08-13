@@ -11,6 +11,7 @@ import (
 	// Aliased because strings_test.go binds the name template to text/template;
 	// one identifier meaning two packages across one test package is a trap.
 	htmltemplate "html/template"
+	texttemplate "text/template"
 )
 
 // --- constructors ---
@@ -1690,6 +1691,95 @@ func TestIsZero_nonStructsUnchanged(t *testing.T) {
 		if got := isZero(c.v); got != c.want {
 			t.Errorf("isZero(%#v) = %v, want %v", c.v, got, c.want)
 		}
+	}
+}
+
+// Kinds that no template is likely to carry, pinned because the per-kind switch
+// these replaced answered "not zero" for every one of them — a nil chan and a
+// nil func included. Deferring to reflect.Value.IsZero is what makes the answer
+// follow the documented definition rather than the list of kinds someone
+// remembered to write down.
+func TestIsZero_uncommonKinds(t *testing.T) {
+	nilChan := (chan int)(nil)
+	openChan := make(chan int)
+	nilFunc := (func())(nil)
+
+	cases := []struct {
+		name string
+		v    any
+		want bool
+	}{
+		{"nil chan", nilChan, true},
+		{"open chan", openChan, false},
+		{"nil func", nilFunc, true},
+		{"non-nil func", func() {}, false},
+		{"zero complex", complex(0, 0), true},
+		{"non-zero complex", complex(1, 0), false},
+	}
+	for _, c := range cases {
+		if got := isZero(c.v); got != c.want {
+			t.Errorf("%s: isZero = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// nilIsZeroer has a value-receiver IsZero, so *nilIsZeroer satisfies the same
+// interface time.Time does and dereferences its receiver when called.
+type nilIsZeroer struct{ n int }
+
+func (z nilIsZeroer) IsZero() bool { return z.n == 0 }
+
+// A nil pointer must report as zero rather than panic. Its type can carry an
+// IsZero method — a value receiver is promoted into the pointer's method set —
+// and calling that method dereferences the nil pointer. An optional date held
+// as a *time.Time is the case that motivates this: {{ default "TBD" .Date }}
+// failed the render instead of falling back.
+func TestIsZero_nilPointerWithIsZeroMethod(t *testing.T) {
+	date := time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC)
+	zeroDate := time.Time{}
+
+	cases := []struct {
+		name string
+		v    any
+		want bool
+	}{
+		{"nil *time.Time", (*time.Time)(nil), true},
+		{"nil *nilIsZeroer", (*nilIsZeroer)(nil), true},
+		// A non-nil pointer still consults the method, which is what keeps a
+		// pointer to a zero time reporting zero.
+		{"pointer to zero time", &zeroDate, true},
+		{"pointer to a real date", &date, false},
+		{"pointer to zero nilIsZeroer", &nilIsZeroer{}, true},
+		{"pointer to non-zero nilIsZeroer", &nilIsZeroer{n: 1}, false},
+	}
+	for _, c := range cases {
+		if got := isZero(c.v); got != c.want {
+			t.Errorf("%s: isZero = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// The panic surfaced through a render as an execution error, so the template
+// path is pinned alongside the direct calls.
+func TestDefaultAndCond_nilPointer(t *testing.T) {
+	var date *time.Time
+
+	if got := Default("TBD", date); got != "TBD" {
+		t.Errorf("Default(\"TBD\", (*time.Time)(nil)) = %v, want TBD", got)
+	}
+	if got := Cond(date, "yes", "no"); got != "no" {
+		t.Errorf("Cond((*time.Time)(nil), ...) = %v, want no", got)
+	}
+
+	tmpl := texttemplate.Must(texttemplate.New("t").Funcs(FuncMap()).Parse(
+		`{{ default "TBD" .Date }} {{ cond .Date "set" "unset" }}`,
+	))
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, map[string]any{"Date": date}); err != nil {
+		t.Fatalf("template execute: %v", err)
+	}
+	if got := buf.String(); got != "TBD unset" {
+		t.Errorf("unexpected output: %q", got)
 	}
 }
 
