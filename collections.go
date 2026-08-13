@@ -84,6 +84,25 @@ func asString(v any) (string, bool) {
 	return "", false
 }
 
+// isNilValue reports whether v is nil, including a typed nil: a (*Page)(nil)
+// carried in an interface is not == nil, though it is just as absent, and
+// fmt.Sprint renders both as "<nil>". This is the package-wide definition of
+// nil, alongside isSequence, asString, and numKindOf.
+//
+// A nil slice or map is deliberately not nil here. Those are ordinary empty
+// containers — they render as "[]" and "map[]", have a length, and range over
+// nothing — so isZero already answers for them by emptiness, and sorting them
+// as values is well defined.
+func isNilValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	// Only Pointer can reach here: reflect.ValueOf unwraps an interface, so a
+	// value of interface kind is never produced from an any.
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
+}
+
 // toSlice converts any slice or array to []any. []any is cloned; other types are
 // expanded via reflection. The result is never nil, only ever empty, so that
 // every function built on it inherits that guarantee — see the note on empty
@@ -199,11 +218,18 @@ func fieldValue(elem any, key string) (any, error) {
 }
 
 // fieldString returns the string representation of a named field in a
-// collection element.
+// collection element, for the key form of sort.
+//
+// A nil field is an error for the reason a nil element is — see requireNoNils.
+// Without the check fmt.Sprint would render it "<nil>" and sort it as that text,
+// which is the silently-wrong-order outcome the check exists to prevent.
 func fieldString(v any, key string) (string, error) {
 	val, err := fieldValue(v, key)
 	if err != nil {
 		return "", err
+	}
+	if isNilValue(val) {
+		return "", fmt.Errorf("field %q is nil", key)
 	}
 	return fmt.Sprint(val), nil
 }
@@ -219,6 +245,11 @@ func fieldNumber(v any, key string) (number, error) {
 	val, err := fieldValue(v, key)
 	if err != nil {
 		return number{}, err
+	}
+	if isNilValue(val) {
+		// Reported as nil rather than as a failed conversion, so it reads the
+		// same as it does from sort. See fieldString.
+		return number{}, fmt.Errorf("field %q is nil", key)
 	}
 	n, err := toNumber(val)
 	if err != nil {
@@ -475,7 +506,6 @@ func isZero(v any) bool {
 	if v == nil {
 		return true
 	}
-	rv := reflect.ValueOf(v)
 	// A nil pointer has to be settled before the IsZero method call below, not
 	// merely by the reflect fallback at the end. A value-receiver IsZero is
 	// promoted into the pointer type's method set, so (*time.Time)(nil) satisfies
@@ -483,9 +513,10 @@ func isZero(v any) bool {
 	// optional date carried as a *time.Time is exactly the shape default exists
 	// for, so the panic is reachable from ordinary template data:
 	// {{ default "TBD" .Date }} failed the whole render rather than falling back.
-	if rv.Kind() == reflect.Pointer && rv.IsNil() {
+	if isNilValue(v) {
 		return true
 	}
+	rv := reflect.ValueOf(v)
 	if z, ok := v.(interface{ IsZero() bool }); ok {
 		return z.IsZero()
 	}
@@ -855,7 +886,42 @@ const (
 	sortTime
 )
 
-// inferSortMode inspects the first non-nil element of elems to decide how to sort.
+// requireNoNils reports the first nil element of elems, if any.
+//
+// Sorting orders values against each other, and a nil has no position among
+// them. It used to get one anyway: the numeric and time modes rejected it, but
+// the lexicographic mode ran it through fmt.Sprint and sorted the text "<nil>",
+// which lands at ASCII '<' — between the digits and the capitals. So a null in
+// the data was silently filed in an arbitrary place, and whether that happened
+// at all depended on the type of the other elements, since they are what chooses
+// the mode. An error is the answer here for the reason it is everywhere else in
+// this file: a wrong order returned as success is worse than a failure that says
+// which element is at fault.
+//
+// Checking up front rather than inside a key function is what makes the index
+// available. "element 37 is nil" is actionable against a page list in a way that
+// a message naming only the fault is not, and one pass over the slice is nothing
+// beside the sort that follows.
+//
+// A caller who wants nils tolerated has to drop them before the template — the
+// package has no filter, deliberately, for the same reason it has no groupBy.
+func requireNoNils(fn string, elems []any) error {
+	for i, e := range elems {
+		if isNilValue(e) {
+			return fmt.Errorf("%s: element %d is nil", fn, i)
+		}
+	}
+	return nil
+}
+
+// inferSortMode inspects the first element of elems to decide how to sort.
+//
+// The first element is enough because requireNoNils has already run, so nothing
+// here is nil. That check replaced a loop that skipped nils to find something
+// informative, which only ever skipped an untyped one: a (*Page)(nil) is not
+// == nil, so it fell through to sortLex and quietly ordered a list of numbers as
+// text — the very failure the paragraph below is about, reached from the other
+// side.
 //
 // Numbers are recognized through asNumber rather than a type switch on the
 // concrete types, so a named type (type Weight int) sorts numerically like the
@@ -867,17 +933,15 @@ const (
 // Strings stay lexicographic even when they hold digits: asNumber excludes them
 // deliberately, and sortNum is the way to ask for "10" to sort after "9".
 func inferSortMode(elems []any) sortMode {
-	for _, e := range elems {
-		if e == nil {
-			continue
-		}
-		if asNumber(e).kind != notNumeric {
-			return sortNumeric
-		}
-		if _, ok := e.(time.Time); ok {
-			return sortTime
-		}
+	if len(elems) == 0 {
 		return sortLex
+	}
+	e := elems[0]
+	if asNumber(e).kind != notNumeric {
+		return sortNumeric
+	}
+	if _, ok := e.(time.Time); ok {
+		return sortTime
 	}
 	return sortLex
 }
@@ -887,7 +951,8 @@ func inferSortMode(elems []any) sortMode {
 //   - time.Time values sort chronologically
 //   - everything else sorts lexicographically (string comparison)
 //
-// For []any, the first non-nil element determines the sort mode.
+// For []any, the first element determines the sort mode.
+// A nil element is an error in every mode, as is a nil value under key.
 // An optional key names a field on each element (always lexicographic); the
 // element may be a struct, a pointer to one, or a map with string-kind keys.
 // It is an error if any element cannot supply that field — see fieldValue.
@@ -905,6 +970,9 @@ func Sort(v any, key ...string) ([]any, error) {
 	out, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("sort: %w", err)
+	}
+	if err := requireNoNils("sort", out); err != nil {
+		return nil, err
 	}
 	if len(key) > 0 {
 		k := key[0]
@@ -957,6 +1025,9 @@ func SortNum(v any, key ...string) ([]any, error) {
 	out, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("sortNum: %w", err)
+	}
+	if err := requireNoNils("sortNum", out); err != nil {
+		return nil, err
 	}
 	if len(key) > 0 {
 		k := key[0]

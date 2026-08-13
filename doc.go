@@ -228,9 +228,16 @@
 //   - reverse(v) []any — new slice in reverse order
 //   - compact(v) []any — remove consecutive duplicate elements; numbers compare by value across types; for full dedup: compact (sort $list)
 //   - concat(slices...) []any — concatenate multiple slices into one
-//   - sort(v [, key]) []any — type-aware sort: numeric types sort numerically, time.Time sorts chronologically, everything else sorts lexicographically; for []any the first non-nil element determines mode; key names a field on each element (always lexicographic)
+//   - sort(v [, key]) []any — type-aware sort: numeric types sort numerically, time.Time sorts chronologically, everything else sorts lexicographically; for []any the first element determines mode; key names a field on each element (always lexicographic)
 //   - sortNum(v [, key]) []any — numeric sort, including numeric strings; key names a field on each element
 //   - where(v, key, val) []any — filter a slice by field equality; numbers compare by value across types; a missing field is an error
+//
+// sort and sortNum reject a nil element, and a nil value under key, in every
+// mode — a typed nil such as a (*Page)(nil) included. A nil has no position
+// among sorted values, and the alternative is not that it gets a sensible one:
+// it would sort as the text "<nil>", which lands between the digits and the
+// capitals. Drop nils before the template if the data can carry them. Equality
+// is a different question, so where, in, and compact all still accept nil.
 //
 // These take a slice or an array only. A string is not a sequence to them, so
 // reverse "abc" is an error rather than "cba" — unlike first, last, take, and

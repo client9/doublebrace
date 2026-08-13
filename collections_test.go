@@ -1391,6 +1391,101 @@ func TestSortNum_errorsAreNotLengthDependent(t *testing.T) {
 
 // Sort and SortNum sit next to each other and must agree on bad input, since
 // that is how the two drifted apart in the first place.
+// A nil has no position among sorted values, so it is an error in every mode.
+// It used to be an error in some: the numeric and time modes rejected it while
+// the lexicographic mode ran it through fmt.Sprint and sorted the text "<nil>",
+// which sorts at ASCII '<' — after the digits, before the capitals. So a null
+// in the data landed in an arbitrary place, and whether it did at all depended
+// on the types of the other elements, since those choose the mode.
+func TestSort_rejectsNil(t *testing.T) {
+	type page struct{ Title string }
+	tm := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name string
+		in   []any
+	}{
+		// The mode the other elements imply must not change the answer.
+		{"nil among strings", []any{nil, "banana", "apple"}},
+		{"nil among numbers", []any{nil, 3, 1}},
+		{"nil among times", []any{nil, tm}},
+		{"nil last", []any{"banana", "apple", nil}},
+		{"all nil", []any{nil, nil}},
+		{"single nil", []any{nil}},
+		// A typed nil is just as absent, and used to be worse than tolerated:
+		// it is not == nil, so it was never skipped during mode inference and
+		// forced the whole list to sort as text. See the case below.
+		{"typed nil among strings", []any{(*page)(nil), "apple"}},
+		{"typed nil among numbers", []any{(*page)(nil), 3, 1}},
+		{"typed nil alone", []any{(*page)(nil)}},
+		{"slice of pointers with a hole", []any{(*page)(nil), &page{"a"}}},
+	}
+	for _, c := range cases {
+		if got, err := Sort(c.in); err == nil {
+			t.Errorf("%s: Sort(%v) = %v, want an error", c.name, c.in, got)
+		}
+		if got, err := SortNum(c.in); err == nil {
+			t.Errorf("%s: SortNum(%v) = %v, want an error", c.name, c.in, got)
+		}
+	}
+
+	// The index is what makes the message actionable against a long page list.
+	if _, err := Sort([]any{"a", "b", nil, "c"}); err == nil {
+		t.Fatal("expected an error")
+	} else if !strings.Contains(err.Error(), "element 2") {
+		t.Errorf("message %q does not name the offending index", err)
+	}
+
+	// A nil field value is rejected on the same grounds as a nil element.
+	withNil := []any{
+		map[string]any{"T": nil, "N": nil},
+		map[string]any{"T": "a", "N": 1},
+	}
+	if _, err := Sort(withNil, "T"); err == nil {
+		t.Error(`Sort(key "T") with a nil field: expected an error`)
+	} else if !strings.Contains(err.Error(), `"T" is nil`) {
+		t.Errorf("message %q does not say the field is nil", err)
+	}
+	if _, err := SortNum(withNil, "N"); err == nil {
+		t.Error(`SortNum(key "N") with a nil field: expected an error`)
+	} else if !strings.Contains(err.Error(), `"N" is nil`) {
+		t.Errorf("message %q does not say the field is nil", err)
+	}
+}
+
+// Rejecting nil is confined to ordering. Equality and membership compare
+// against nil legitimately — a filter for the pages whose Draft field is unset
+// is a real query — so where, in, and compact must keep accepting it.
+func TestNilStillWorksForEquality(t *testing.T) {
+	items := []any{
+		map[string]any{"K": nil},
+		map[string]any{"K": 1},
+	}
+	got, err := Where(items, "K", nil)
+	if err != nil {
+		t.Fatalf("Where(K, nil): %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("Where(K, nil) matched %d elements, want 1", len(got))
+	}
+
+	if ok, err := In([]any{nil, 1}, nil); err != nil || !ok {
+		t.Errorf("In([nil 1], nil) = %v, %v; want true", ok, err)
+	}
+	compacted, err := Compact([]any{nil, nil, 1})
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if len(compacted) != 2 {
+		t.Errorf("Compact([nil nil 1]) = %v, want two elements", compacted)
+	}
+	// A nil slice or map is an ordinary empty container, not a nil value, so it
+	// still sorts.
+	if _, err := Sort([]any{[]int(nil), []int{1}}); err != nil {
+		t.Errorf("Sort with a nil slice element: %v", err)
+	}
+}
+
 // The message has to name what actually went wrong. sortNum's key path used to
 // build a fresh "cannot convert field %q to number" and drop the cause, so six
 // distinct failures — a mistyped key, an unexported field, a nil pointer
@@ -1423,8 +1518,11 @@ func TestSortErrors_nameTheCause(t *testing.T) {
 			[]string{"sortNum", `"hits"`, "unexported"}},
 		{"sortNum key on a scalar", func() ([]any, error) { return SortNum([]any{1, 2}, "Year") },
 			[]string{"sortNum", "not a map or struct", "int"}},
+		// A nil pointer element no longer reaches the field lookup at all: the
+		// nil check runs first and names the index, which is the more useful of
+		// the two answers. See TestSort_rejectsNil.
 		{"sortNum key on a nil pointer", func() ([]any, error) { return SortNum([]any{(*page)(nil)}, "Year") },
-			[]string{"sortNum", `"Year"`, "nil"}},
+			[]string{"sortNum", "element 0", "nil"}},
 		{"sortNum key on non-string map keys", func() ([]any, error) { return SortNum([]any{map[int]any{1: 2}}, "Year") },
 			[]string{"sortNum", "want string"}},
 		// The one case the old message was right about still reads correctly,
