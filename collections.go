@@ -118,6 +118,26 @@ func toSlice(v any) ([]any, error) {
 	return out, nil
 }
 
+// toElems is toSlice for the four functions that also accept a string — first,
+// last, take, and drop, which reach a string through asString before they get
+// here. It differs only in the error.
+//
+// toSlice says "expected slice or array", which is the truth for the functions
+// that only take a sequence but names two of the three shapes these four accept.
+// first 42 reported "first: expected slice or array, got int", which reads as
+// though a string would not have worked either, and the one thing an author in
+// that position needs to know is which of the shapes they actually have.
+//
+// Replacing the message rather than wrapping it loses nothing: toSlice has a
+// single error, and this restates the same fact more completely.
+func toElems(fn string, v any) ([]any, error) {
+	elems, err := toSlice(v)
+	if err != nil {
+		return nil, fmt.Errorf("%s: expected a slice, array, or string, got %T", fn, v)
+	}
+	return elems, nil
+}
+
 // fieldValue reads the field named key from a collection element, for the
 // key-taking forms of where, sort, and sortNum.
 //
@@ -620,9 +640,9 @@ func First(v any) (any, error) {
 		}
 		return string(r[0]), nil
 	}
-	elems, err := toSlice(v)
+	elems, err := toElems("first", v)
 	if err != nil {
-		return nil, fmt.Errorf("first: %w", err)
+		return nil, err
 	}
 	if len(elems) == 0 {
 		return nil, errors.New("first: empty slice")
@@ -642,9 +662,9 @@ func Last(v any) (any, error) {
 		}
 		return string(r[len(r)-1]), nil
 	}
-	elems, err := toSlice(v)
+	elems, err := toElems("last", v)
 	if err != nil {
-		return nil, fmt.Errorf("last: %w", err)
+		return nil, err
 	}
 	if len(elems) == 0 {
 		return nil, errors.New("last: empty slice")
@@ -678,9 +698,9 @@ func Take(v any, n any) (any, error) {
 		start := max(len(r)+count, 0)
 		return string(r[start:]), nil
 	}
-	elems, err := toSlice(v)
+	elems, err := toElems("take", v)
 	if err != nil {
-		return nil, fmt.Errorf("take: %w", err)
+		return nil, err
 	}
 	if count >= 0 {
 		return elems[:min(count, len(elems))], nil
@@ -716,9 +736,9 @@ func Drop(v any, n any) (any, error) {
 		end := max(len(r)+count, 0)
 		return string(r[:end]), nil
 	}
-	elems, err := toSlice(v)
+	elems, err := toElems("drop", v)
 	if err != nil {
-		return nil, fmt.Errorf("drop: %w", err)
+		return nil, err
 	}
 	if count >= 0 {
 		return elems[min(count, len(elems)):], nil
@@ -1206,7 +1226,7 @@ func In(v, val any) (bool, error) {
 		}
 		return rv.MapIndex(kv).IsValid(), nil
 	default:
-		return false, fmt.Errorf("in: unsupported type %T", v)
+		return false, fmt.Errorf("in: expected a slice, array, map, or string, got %T", v)
 	}
 }
 

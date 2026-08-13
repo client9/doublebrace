@@ -1050,6 +1050,75 @@ func TestCollections_doNotMutateArrayInput(t *testing.T) {
 	}
 }
 
+// An error has to name the shapes the function actually takes. first, last,
+// take, and drop accept a string as a sequence of runes, but reported
+// toSlice's "expected slice or array" — which reads as though a string would
+// have been refused too, and points an author at the wrong mistake. The
+// functions that genuinely take only a sequence must keep saying so, or the
+// fix would trade one wrong message for another.
+func TestSequenceErrors_nameTheAcceptedShapes(t *testing.T) {
+	stringTaking := []struct {
+		name string
+		fn   func(any) (any, error)
+	}{
+		{"first", First},
+		{"last", Last},
+		{"take", func(v any) (any, error) { return Take(v, 1) }},
+		{"drop", func(v any) (any, error) { return Drop(v, 1) }},
+	}
+	for _, c := range stringTaking {
+		// A string really is accepted, which is what makes the message matter.
+		if _, err := c.fn("abc"); err != nil {
+			t.Errorf("%s(%q): unexpected error: %v", c.name, "abc", err)
+		}
+		_, err := c.fn(42)
+		if err == nil {
+			t.Errorf("%s(42): expected an error", c.name)
+			continue
+		}
+		for _, frag := range []string{c.name, "string", "int"} {
+			if !strings.Contains(err.Error(), frag) {
+				t.Errorf("%s(42): message %q does not mention %s", c.name, err, frag)
+			}
+		}
+	}
+
+	// in accepts a map as well, and its message used to name nothing at all.
+	if _, err := In(42, 1); err == nil {
+		t.Error("In(42, 1): expected an error")
+	} else {
+		for _, frag := range []string{"in", "map", "string", "int"} {
+			if !strings.Contains(err.Error(), frag) {
+				t.Errorf("In(42, 1): message %q does not mention %s", err, frag)
+			}
+		}
+	}
+
+	// The sequence-only functions must not start advertising strings: they
+	// reject one, and saying otherwise would be the same bug pointed the other
+	// way.
+	sequenceOnly := []struct {
+		name string
+		fn   func(any) (any, error)
+	}{
+		{"reverse", func(v any) (any, error) { return Reverse(v) }},
+		{"compact", func(v any) (any, error) { return Compact(v) }},
+		{"sort", func(v any) (any, error) { return Sort(v) }},
+		{"where", func(v any) (any, error) { return Where(v, "K", 1) }},
+	}
+	for _, c := range sequenceOnly {
+		_, err := c.fn("abc")
+		if err == nil {
+			t.Errorf("%s(%q): expected an error, a string is not a sequence here", c.name, "abc")
+			continue
+		}
+		if strings.Contains(err.Error(), "or string") {
+			t.Errorf("%s(%q): message %q offers strings, which it does not accept",
+				c.name, "abc", err)
+		}
+	}
+}
+
 func TestToSlice_rejectsNonSequences(t *testing.T) {
 	for _, in := range []any{nil, 42, "a string", map[string]any{"a": 1}, struct{}{}} {
 		if _, err := toSlice(in); err == nil {

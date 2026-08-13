@@ -232,6 +232,12 @@
 //   - sortNum(v [, key]) []any — numeric sort, including numeric strings; key names a field on each element
 //   - where(v, key, val) []any — filter a slice by field equality; numbers compare by value across types; a missing field is an error
 //
+// These take a slice or an array only. A string is not a sequence to them, so
+// reverse "abc" is an error rather than "cba" — unlike first, last, take, and
+// drop, which do treat a string as a sequence of runes. Reversing text is a
+// different job from reversing a list: it needs grapheme clusters, not runes,
+// or it takes apart any character built from a combining mark.
+//
 // For descending order compose with reverse: reverse (sort $pages "Title")
 //
 // ISO 8601 date strings ("2006-01-02") sort correctly with lexicographic order.
