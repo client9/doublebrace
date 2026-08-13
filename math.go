@@ -265,6 +265,13 @@ func Clamp(val, minVal, maxVal any) (float64, error) {
 }
 
 // toFloat64 converts any numeric type or numeric string to float64.
+//
+// The type switch below is a fast path for the concrete types template data
+// usually arrives as; it is not the definition of what counts as numeric.
+// Named types (type Weight int) do not match a concrete case, so anything that
+// falls through is classified by reflect kind instead — the same rule asNumber,
+// isZero, and In already apply. Without that fallback a template could compare
+// a Weight with in but not add to it, and sort would silently order it as text.
 func toFloat64(v any) (float64, error) {
 	switch n := v.(type) {
 	case float64:
@@ -293,7 +300,19 @@ func toFloat64(v any) (float64, error) {
 		return float64(n), nil
 	case string:
 		return strconv.ParseFloat(n, 64)
-	default:
-		return 0, fmt.Errorf("cannot convert %T to float64", v)
 	}
+	rv := reflect.ValueOf(v)
+	if rv.IsValid() {
+		switch rv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return float64(rv.Int()), nil
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return float64(rv.Uint()), nil
+		case reflect.Float32, reflect.Float64:
+			return rv.Float(), nil
+		case reflect.String:
+			return strconv.ParseFloat(rv.String(), 64)
+		}
+	}
+	return 0, fmt.Errorf("cannot convert %T to float64", v)
 }

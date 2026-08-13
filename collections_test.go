@@ -470,6 +470,46 @@ func TestSort(t *testing.T) {
 	}
 }
 
+// A named numeric type is still a number. Classifying it by concrete type made
+// sort fall through to the lexicographic mode, so []Weight{10, 2, 30} came back
+// as [10 2 30] — sorted as text, with no error to say so. in and where reached
+// the same value through asNumber and disagreed.
+func TestSort_namedNumericTypes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		want []any
+	}{
+		{"named int", []Weight{10, 2, 30}, []any{Weight(2), Weight(10), Weight(30)}},
+		{"named uint", []Count{10, 2, 30}, []any{Count(2), Count(10), Count(30)}},
+		{"named float", []Ratio{1.5, 0.5, 2.5}, []any{Ratio(0.5), Ratio(1.5), Ratio(2.5)}},
+		// The mode is inferred from the first non-nil element, so a named type
+		// there must also govern the widths that follow it.
+		{"named leads []any", []any{Weight(10), 2, int64(30)}, []any{2, Weight(10), int64(30)}},
+	}
+	for _, c := range cases {
+		got, err := Sort(c.in)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+
+	// A named string type stays lexicographic: asNumber excludes strings on
+	// purpose, and sortNum is how you ask for "10" to sort after "9".
+	got, err := Sort([]Slug{"10", "9", "2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []any{Slug("10"), Slug("2"), Slug("9")}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("named string: got %v, want %v", got, want)
+	}
+}
+
 func TestSortNum(t *testing.T) {
 	// numeric strings
 	got, err := SortNum([]string{"10", "9", "2"})
@@ -926,8 +966,6 @@ func TestFunctionsReturnEmptyNotNil(t *testing.T) {
 // stricter than text/template's own eq, which already unifies integer widths,
 // and the mismatch surfaced as an empty result rather than an error.
 func TestValuesEqual_numericAcrossTypes(t *testing.T) {
-	type Weight int
-
 	cases := []struct {
 		a, b any
 		want bool

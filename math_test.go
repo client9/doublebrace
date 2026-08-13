@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+// Named types standing in for the shapes template data actually carries: a
+// numeric field declared as its own type, and a string one. They exist to reach
+// toFloat64's reflect fallback, which the concrete type switch above it cannot.
+type (
+	Weight int
+	Count  uint
+	Ratio  float64
+	Slug   string
+	Flag   bool // a named type of a kind that is deliberately not numeric
+)
+
 func TestToFloat64(t *testing.T) {
 	cases := []struct {
 		in   any
@@ -28,6 +39,15 @@ func TestToFloat64(t *testing.T) {
 		{"3.14", 3.14, true},
 		{"bad", 0, false},
 		{true, 0, false},
+		// Named types reach the reflect fallback, not the type switch. Template
+		// data routinely carries these (type Weight int in a page struct), and
+		// without the fallback in accepted them while add and sort did not.
+		{Weight(3), 3.0, true},
+		{Ratio(1.5), 1.5, true},
+		{Count(7), 7.0, true},
+		{Slug("2.5"), 2.5, true},
+		{Slug("bad"), 0, false},
+		{[]byte("3"), 0, false},
 	}
 	for _, c := range cases {
 		got, err := toFloat64(c.in)

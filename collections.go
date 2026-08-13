@@ -617,17 +617,25 @@ const (
 )
 
 // inferSortMode inspects the first non-nil element of elems to decide how to sort.
+//
+// Numbers are recognized through asNumber rather than a type switch on the
+// concrete types, so a named type (type Weight int) sorts numerically like the
+// int it is. A type switch here would classify it as sortLex and quietly order
+// [10 2 30] as text, which is a wrong answer rather than an error — and would
+// disagree with in, compact, and where, which reach the same value through
+// asNumber and treat it as a number.
+//
+// Strings stay lexicographic even when they hold digits: asNumber excludes them
+// deliberately, and sortNum is the way to ask for "10" to sort after "9".
 func inferSortMode(elems []any) sortMode {
 	for _, e := range elems {
 		if e == nil {
 			continue
 		}
-		switch e.(type) {
-		case int, int8, int16, int32, int64,
-			uint, uint8, uint16, uint32, uint64,
-			float32, float64:
+		if asNumber(e).kind != notNumeric {
 			return sortNumeric
-		case time.Time:
+		}
+		if _, ok := e.(time.Time); ok {
 			return sortTime
 		}
 		return sortLex

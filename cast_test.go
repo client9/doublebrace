@@ -110,6 +110,59 @@ func TestToInt_boundariesAreInclusive(t *testing.T) {
 
 // Strings must convert exactly like the values they spell, so that a template
 // does not behave differently depending on whether YAML quoted the number.
+// A named type is still the number it is built on. The type switch in ToInt
+// matches concrete types only, so these reach the reflect fallback — which must
+// route each kind through the same range-checked helper the concrete case uses,
+// not merely convert and hope.
+func TestToInt_namedTypes(t *testing.T) {
+	type Rate float32
+
+	cases := []struct {
+		name string
+		in   any
+		want int
+	}{
+		{"named int", Weight(42), 42},
+		{"named int negative", Weight(-42), -42},
+		{"named uint", Count(7), 7},
+		{"named float truncates", Ratio(3.9), 3},
+		{"named float toward zero", Ratio(-3.9), -3},
+		// rv.Float widens a float32 exactly, as the concrete float32 case does.
+		{"named float32", Rate(3.9), 3},
+		{"named string int", Slug("17"), 17},
+		{"named string float", Slug("3.9"), 3},
+	}
+	for _, c := range cases {
+		got, err := ToInt(c.in)
+		if err != nil {
+			t.Errorf("%s: ToInt(%v): %v", c.name, c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s: ToInt(%v) = %d, want %d", c.name, c.in, got, c.want)
+		}
+	}
+
+	// The range and parse checks must survive the reflect path; converting
+	// without them would wrap silently, which is the whole point of ToInt.
+	bad := []struct {
+		name string
+		in   any
+	}{
+		{"named uint overflows int", Count(math.MaxUint)},
+		{"named float NaN", Ratio(math.NaN())},
+		{"named float infinity", Ratio(math.Inf(1))},
+		{"named float out of range", Ratio(1e300)},
+		{"named string non-numeric", Slug("abc")},
+		{"named bool unsupported", Flag(true)},
+	}
+	for _, c := range bad {
+		if got, err := ToInt(c.in); err == nil {
+			t.Errorf("%s: ToInt(%v) = %d, want an error", c.name, c.in, got)
+		}
+	}
+}
+
 func TestToInt_stringMatchesNumeric(t *testing.T) {
 	cases := []struct {
 		in         string

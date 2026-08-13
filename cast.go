@@ -3,6 +3,7 @@ package doublebrace
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"text/template"
 )
@@ -22,6 +23,11 @@ func castFuncMap() template.FuncMap {
 // or saturated result: NaN, ±Inf, and anything outside [math.MinInt, math.MaxInt]
 // are all rejected.
 //
+// As in toFloat64, the type switch is a fast path rather than the definition of
+// what counts as numeric: a named type (type Weight int) matches no concrete
+// case and is classified by reflect kind below it, which is the rule asNumber,
+// isZero, and In already follow.
+//
 //	toInt 42        → 42
 //	toInt 3.9       → 3
 //	toInt "17"      → 17
@@ -38,10 +44,7 @@ func ToInt(v any) (int, error) {
 		// int is at least 32 bits, so int8/int16/int32 always fit.
 		return int(n), nil
 	case int64:
-		if n > int64(math.MaxInt) || n < int64(math.MinInt) {
-			return 0, fmt.Errorf("toInt: %d overflows int", n)
-		}
-		return int(n), nil
+		return intFromInt64(n)
 	case uint8:
 		return int(n), nil
 	case uint16:
@@ -58,19 +61,53 @@ func ToInt(v any) (int, error) {
 	case float64:
 		return intFromFloat64(n)
 	case string:
-		// Atoi first: ParseFloat would lose precision above 2^53, so a string
-		// holding a large exact integer must not go through the float path.
-		if i, err := strconv.Atoi(n); err == nil {
-			return i, nil
-		}
-		f, err := strconv.ParseFloat(n, 64)
-		if err != nil {
-			return 0, fmt.Errorf("toInt: %w", err)
-		}
-		return intFromFloat64(f)
-	default:
-		return 0, fmt.Errorf("toInt: cannot convert %T", v)
+		return intFromString(n)
 	}
+	// Named types land here. Every kind is routed through the same range-checked
+	// helper the corresponding concrete case uses, so a Weight overflows exactly
+	// where the int64 it is built on would.
+	rv := reflect.ValueOf(v)
+	if rv.IsValid() {
+		switch rv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return intFromInt64(rv.Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return intFromUint64(rv.Uint())
+		case reflect.Float32, reflect.Float64:
+			// rv.Float widens a float32 to float64 exactly, matching what the
+			// float32 case above does.
+			return intFromFloat64(rv.Float())
+		case reflect.String:
+			return intFromString(rv.String())
+		}
+	}
+	return 0, fmt.Errorf("toInt: cannot convert %T", v)
+}
+
+// intFromInt64 converts n to int, reporting an error rather than truncating when
+// it does not fit. On a 64-bit platform int is int64 and the bounds can never
+// trip; on a 32-bit one they are the whole point.
+func intFromInt64(n int64) (int, error) {
+	if n > int64(math.MaxInt) || n < int64(math.MinInt) {
+		return 0, fmt.Errorf("toInt: %d overflows int", n)
+	}
+	return int(n), nil
+}
+
+// intFromString parses s as an integer, falling back to a float so that "3.9"
+// truncates the way 3.9 does.
+//
+// Atoi is tried first because ParseFloat loses precision above 2^53: a string
+// holding a large exact integer must not go through the float path.
+func intFromString(s string) (int, error) {
+	if i, err := strconv.Atoi(s); err == nil {
+		return i, nil
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("toInt: %w", err)
+	}
+	return intFromFloat64(f)
 }
 
 // intFromUint64 converts u to int, reporting an error rather than wrapping
