@@ -540,24 +540,37 @@ func seqSpan(start, end, step int) (uint64, bool) {
 // Seq returns a slice of integers. Counting is 1-based by default.
 // The sequence may not exceed MaxSeqLen elements.
 //
+// Bounds are any numeric type or numeric string, converted as toInt does — so
+// seq (add $n 1) and a count read from data both work.
+//
 //	seq 5        → [1 2 3 4 5]
 //	seq 3 7      → [3 4 5 6 7]
 //	seq 1 10 2   → [1 3 5 7 9]
 //	seq 5 1 -1   → [5 4 3 2 1]
-func Seq(args ...int) ([]int, error) {
+func Seq(args ...any) ([]int, error) {
+	if len(args) < 1 || len(args) > 3 {
+		return nil, fmt.Errorf("seq: expected 1–3 arguments, got %d", len(args))
+	}
+	bounds := make([]int, len(args))
+	for i, a := range args {
+		n, err := toCount(fmt.Sprintf("seq: argument %d", i+1), a)
+		if err != nil {
+			return nil, err
+		}
+		bounds[i] = n
+	}
+
 	var start, end, step int
-	switch len(args) {
+	switch len(bounds) {
 	case 1:
-		start, end, step = 1, args[0], 1
+		start, end, step = 1, bounds[0], 1
 	case 2:
-		start, end, step = args[0], args[1], 1
-	case 3:
-		start, end, step = args[0], args[1], args[2]
+		start, end, step = bounds[0], bounds[1], 1
+	default:
+		start, end, step = bounds[0], bounds[1], bounds[2]
 		if step == 0 {
 			return nil, errors.New("seq: step cannot be zero")
 		}
-	default:
-		return nil, fmt.Errorf("seq: expected 1–3 arguments, got %d", len(args))
 	}
 
 	span, ok := seqSpan(start, end, step)
@@ -635,35 +648,36 @@ func Last(v any) (any, error) {
 // If |n| exceeds the length the full input is returned.
 // Rune-aware for strings: multi-byte characters are not split.
 //
+// n is any numeric type or numeric string, converted as toInt does — so the
+// float64 every math function returns is a usable count: take $list (div $n 2).
+//
 //	take []int{1, 2, 3, 4, 5} 3  → []any{1, 2, 3}
 //	take []int{1, 2, 3, 4, 5} -2 → []any{4, 5}
 //	take "日本語" 2                → "日本"
 //	take "日本語" -1               → "語"
-func Take(v any, n int) (any, error) {
+func Take(v any, n any) (any, error) {
+	count, err := toCount("take", n)
+	if err != nil {
+		return nil, err
+	}
 	if s, ok := asString(v); ok {
 		r := []rune(s)
-		if n >= 0 {
-			if n > len(r) {
-				n = len(r)
-			}
-			return string(r[:n]), nil
+		if count >= 0 {
+			return string(r[:min(count, len(r))]), nil
 		}
 		// negative: last |n| runes
-		start := max(len(r)+n, 0)
+		start := max(len(r)+count, 0)
 		return string(r[start:]), nil
 	}
 	elems, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("take: %w", err)
 	}
-	if n >= 0 {
-		if n > len(elems) {
-			n = len(elems)
-		}
-		return elems[:n], nil
+	if count >= 0 {
+		return elems[:min(count, len(elems))], nil
 	}
 	// negative: last |n| elements
-	start := max(len(elems)+n, 0)
+	start := max(len(elems)+count, 0)
 	return elems[start:], nil
 }
 
@@ -672,35 +686,36 @@ func Take(v any, n int) (any, error) {
 // If |n| exceeds the length an empty result is returned.
 // Rune-aware for strings: multi-byte characters are not split.
 //
+// n is any numeric type or numeric string, converted as toInt does — so the
+// float64 every math function returns is a usable count: drop $list (div $n 2).
+//
 //	drop []int{1, 2, 3, 4, 5} 2  → []any{3, 4, 5}
 //	drop []int{1, 2, 3, 4, 5} -2 → []any{1, 2, 3}
 //	drop "日本語" 1                → "本語"
 //	drop "日本語" -1               → "日本"
-func Drop(v any, n int) (any, error) {
+func Drop(v any, n any) (any, error) {
+	count, err := toCount("drop", n)
+	if err != nil {
+		return nil, err
+	}
 	if s, ok := asString(v); ok {
 		r := []rune(s)
-		if n >= 0 {
-			if n > len(r) {
-				n = len(r)
-			}
-			return string(r[n:]), nil
+		if count >= 0 {
+			return string(r[min(count, len(r)):]), nil
 		}
 		// negative: remove last |n| runes
-		end := max(len(r)+n, 0)
+		end := max(len(r)+count, 0)
 		return string(r[:end]), nil
 	}
 	elems, err := toSlice(v)
 	if err != nil {
 		return nil, fmt.Errorf("drop: %w", err)
 	}
-	if n >= 0 {
-		if n > len(elems) {
-			n = len(elems)
-		}
-		return elems[n:], nil
+	if count >= 0 {
+		return elems[min(count, len(elems)):], nil
 	}
 	// negative: remove last |n| elements
-	end := max(len(elems)+n, 0)
+	end := max(len(elems)+count, 0)
 	return elems[:end], nil
 }
 

@@ -498,11 +498,24 @@ func ExampleRepeat_limits() {
 }
 
 func ExampleTruncate() {
-	fmt.Println(doublebrace.Truncate("hello world", 8))
-	fmt.Println(doublebrace.Truncate("hi", 8))
+	v, _ := doublebrace.Truncate("hello world", 8)
+	fmt.Println(v)
+	v, _ = doublebrace.Truncate("hi", 8)
+	fmt.Println(v)
 	// Output:
 	// hello w…
 	// hi
+}
+
+// A length is any numeric type or numeric string, converted as toInt does. The
+// math functions all return float64, so this is what lets one supply a length:
+// truncate $title (sub $width 4).
+func ExampleTruncate_computedLength() {
+	width, _ := doublebrace.Sub(12, 4)
+	v, _ := doublebrace.Truncate("hello world", width)
+	fmt.Printf("%T %v → %q\n", width, width, v)
+	// Output:
+	// float64 8 → "hello w…"
 }
 
 func ExampleLenRunes() {
@@ -531,13 +544,15 @@ func ExampleJoin_collection() {
 }
 
 func ExampleReplace() {
-	fmt.Println(doublebrace.Replace("aabbaa", "a", "x"))
+	v, _ := doublebrace.Replace("aabbaa", "a", "x")
+	fmt.Println(v)
 	// Output:
 	// xabbaa
 }
 
 func ExampleReplace_count() {
-	fmt.Println(doublebrace.Replace("aabbaa", "a", "x", -1))
+	v, _ := doublebrace.Replace("aabbaa", "a", "x", -1)
+	fmt.Println(v)
 	// Output:
 	// xxbbxx
 }

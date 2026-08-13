@@ -12,12 +12,12 @@
 //
 // Most functions are also exported as named Go functions — Truncate, Sort,
 // Where — so they are callable directly and visible on pkg.go.dev. A function
-// whose behavior is exactly a stdlib call is the exception: it is registered by
-// direct assignment and has no exported counterpart here, because an alias that
-// only forwards to strings.ToLower would be a worse way to call strings.ToLower.
-// The listings below name the stdlib function in each such case; call it
-// directly. A stdlib function may only be registered this way if it already
-// satisfies the guarantees above, in particular that it never returns nil.
+// whose behavior is exactly a stdlib call is the exception: it has no exported
+// counterpart here, because an alias that only forwards to strings.ToLower
+// would be a worse way to call strings.ToLower. The listings below name the
+// stdlib function in each such case; call it directly. Such a function may only
+// be registered if it already satisfies the guarantees above, in particular
+// that it never returns nil.
 //
 // # Usage
 //
@@ -55,6 +55,26 @@
 //   - truncate(s, n) string — shorten to at most n runes; appends "…" if truncated
 //   - firstUpper(s) string — uppercase first rune only; all other characters unchanged
 //
+// # Text arguments
+//
+// Wherever a function takes text it accepts any value of string kind: a plain
+// string, a named type (type Slug string), or an html/template typed value.
+// This holds for every string argument in the FuncMap — the functions above,
+// urlEncode and urlPathEscape, and first, last, take, drop, and in, which treat
+// a string as a sequence of runes. A function is never picky about a type its
+// neighbour accepts.
+//
+// The result is always a plain string, never the input's own type. For an
+// html/template value that is a security property rather than a detail:
+// lowercasing or truncating markup produces text that is no longer the markup
+// that was vouched for, so it is escaped for whatever context it lands in. A
+// template.URL that has been through lower is rejected as a URL, which is the
+// fail-closed direction.
+//
+// The exported Go functions keep their string parameters. The coercion is for
+// templates, which lose the static type of every value they pass; a Go caller
+// holding a Slug knows it is one and writes string(slug).
+//
 // # Math
 //
 // All math functions accept any numeric type or numeric string as input.
@@ -74,6 +94,20 @@
 //   - min(args...) float64 — minimum value; accepts scalars, slices, arrays, or a mix
 //   - max(args...) float64 — maximum value; accepts scalars, slices, arrays, or a mix
 //   - clamp(val, min, max) float64 — constrain val to [min, max]
+//
+// # Counts
+//
+// Wherever a function takes a count — the n of take, drop, truncate, repeat,
+// and replace, and the bounds of seq — it accepts any numeric type or numeric
+// string and converts it the way toInt does, truncating a float toward zero and
+// reporting an out-of-range value as an error rather than a wrapped length.
+//
+// This is what makes a count composable with the arithmetic above. A count is
+// the most likely argument in a template to be computed rather than written
+// down, and templates do not convert an argument, they require an assignable
+// type. An int parameter would therefore reject the float64 every math function
+// returns, along with an int64 field and anything decoded from JSON, and
+// take $list (div $n 2) could not be written at all.
 //
 // # Encoding
 //
@@ -134,6 +168,8 @@
 //   - urlEncode(s) string — percent-encode for query strings; spaces become +
 //   - urlPathEscape(s) string — percent-encode a single path segment; / is encoded too
 //
+// Both take any value of string kind — see Text arguments above.
+//
 // # Collections — Immutability
 //
 // Collection functions always return newly allocated structures and never
@@ -162,19 +198,25 @@
 // way by MaxRepeatLen — wherever a count can come from data, a mistyped or
 // hostile one is an error rather than an allocation.
 //
+// seq's bounds are counts, so they accept any numeric type or numeric string —
+// see Counts above.
+//
 // # Collections — Sequence Access
 //
 // These functions operate on any slice, array, or string. String operations are
 // rune-aware: multi-byte characters are never split.
 //
-// "String" means any value of string kind, so a named type (type Slug string)
-// and an html/template typed value both work, as they do with in. The result is
-// a plain string rather than the input's own type — slicing markup by runes can
-// cut a tag or an entity in half, so a truncated template.HTML is no longer
-// trusted markup and is escaped like any other string.
+// "String" means any value of string kind, the same rule the text functions
+// follow — see Text arguments above. The result is a plain string rather than
+// the input's own type: slicing markup by runes can cut a tag or an entity in
+// half, so a truncated template.HTML is no longer trusted markup and is escaped
+// like any other string.
 //
 // They return any, rather than the []any returned elsewhere, because the result
 // follows the input: a string argument yields a string or a rune, not a slice.
+//
+// The n of take and drop is a count, so it accepts any numeric type or numeric
+// string — see Counts above.
 //
 //   - first(v) any — first element of a slice, or first rune of a string
 //   - last(v) any — last element of a slice, or last rune of a string

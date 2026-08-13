@@ -137,6 +137,31 @@ func intFromFloat64(f float64) (int, error) {
 	return int(f), nil
 }
 
+// toCount converts a count argument to an int: the n of take, drop, truncate,
+// repeat, and replace, and the bounds of seq. fn names the calling function for
+// the error message.
+//
+// Those parameters are typed any rather than int for a reason that only shows up
+// from a template. text/template does not convert an argument, it requires an
+// assignable type — so with an int parameter, take $list (add $i 1) failed with
+// "wrong type for value; expected int; got float64", because every math function
+// here returns float64. So did take $list .N for an int64 field, and for anything
+// decoded from JSON, which arrives as float64. A count is the most likely thing
+// in a template to be computed rather than written down, and it was the one
+// place arithmetic could not reach.
+//
+// Routing through ToInt rather than toFloat64 keeps one definition of what
+// becoming an int means, including the range checks: a count far outside int's
+// range is an error rather than a wrapped or saturated length. Truncation toward
+// zero comes with it, so div 10 3 counts as 3.
+func toCount(fn string, v any) (int, error) {
+	n, err := ToInt(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", fn, err)
+	}
+	return n, nil
+}
+
 // ToFloat converts v to float64. Numeric types are converted directly.
 // Numeric strings are parsed with strconv.ParseFloat.
 //

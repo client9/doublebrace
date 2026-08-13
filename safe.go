@@ -9,14 +9,17 @@ import (
 
 func safeFuncMap() template.FuncMap {
 	return template.FuncMap{
-		"safeCSS":       SafeCSS,
-		"safeHTML":      SafeHTML,
-		"safeHTMLAttr":  SafeHTMLAttr,
-		"safeJS":        SafeJS,
-		"safeJSStr":     SafeJSStr,
-		"safeURL":       SafeURL,
-		"urlEncode":     URLEncode,
-		"urlPathEscape": URLPathEscape,
+		"safeCSS":      SafeCSS,
+		"safeHTML":     SafeHTML,
+		"safeHTMLAttr": SafeHTMLAttr,
+		"safeJS":       SafeJS,
+		"safeJSStr":    SafeJSStr,
+		"safeURL":      SafeURL,
+		// Registered through strFn1 for the reason the string functions are: a
+		// named type or an html/template value is a string here. The safe* entries
+		// above already take any, by way of safeString.
+		"urlEncode":     strFn1("urlEncode", URLEncode),
+		"urlPathEscape": strFn1("urlPathEscape", URLPathEscape),
 	}
 }
 

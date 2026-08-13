@@ -150,20 +150,31 @@ func TestJoin_composesWithCollections(t *testing.T) {
 func TestReplace(t *testing.T) {
 	cases := []struct {
 		s, old, new string
-		n           []int
+		n           []any
 		want        string
 	}{
-		{"aabbaa", "a", "x", nil, "xabbaa"},       // default: first only
-		{"aabbaa", "a", "x", []int{1}, "xabbaa"},  // explicit 1
-		{"aabbaa", "a", "x", []int{3}, "xxbbxa"},  // limit 3
-		{"aabbaa", "a", "x", []int{-1}, "xxbbxx"}, // all
-		{"hello", "z", "x", nil, "hello"},         // no match
+		{"aabbaa", "a", "x", nil, "xabbaa"},        // default: first only
+		{"aabbaa", "a", "x", []any{1}, "xabbaa"},   // explicit 1
+		{"aabbaa", "a", "x", []any{3}, "xxbbxa"},   // limit 3
+		{"aabbaa", "a", "x", []any{-1}, "xxbbxx"},  // all
+		{"hello", "z", "x", nil, "hello"},          // no match
+		{"aabbaa", "a", "x", []any{3.0}, "xxbbxa"}, // a float count, as math returns
+		{"aabbaa", "a", "x", []any{"3"}, "xxbbxa"}, // a numeric string
+		{"aabbaa", "a", "x", []any{int64(3)}, "xxbbxa"},
 	}
 	for _, c := range cases {
-		got := Replace(c.s, c.old, c.new, c.n...)
+		got, err := Replace(c.s, c.old, c.new, c.n...)
+		if err != nil {
+			t.Errorf("Replace(%q, %q, %q, %v): %v", c.s, c.old, c.new, c.n, err)
+			continue
+		}
 		if got != c.want {
 			t.Errorf("Replace(%q, %q, %q, %v) = %q, want %q", c.s, c.old, c.new, c.n, got, c.want)
 		}
+	}
+
+	if _, err := Replace("a", "a", "x", "many"); err == nil {
+		t.Error("Replace with a non-numeric count: expected an error")
 	}
 }
 
@@ -248,20 +259,32 @@ func TestLenRunes(t *testing.T) {
 func TestTruncate(t *testing.T) {
 	tests := []struct {
 		in   string
-		n    int
+		n    any
 		want string
 	}{
-		{"hello", 10, "hello"},         // shorter than limit
-		{"hello", 5, "hello"},          // exact length
-		{"hello world", 8, "hello w…"}, // cut with ellipsis
-		{"hello", 1, "…"},              // n=1 is just ellipsis
-		{"hello", 0, ""},               // n=0 is empty
-		{"héllo", 4, "hél…"},           // rune-aware
+		{"hello", 10, "hello"},           // shorter than limit
+		{"hello", 5, "hello"},            // exact length
+		{"hello world", 8, "hello w…"},   // cut with ellipsis
+		{"hello", 1, "…"},                // n=1 is just ellipsis
+		{"hello", 0, ""},                 // n=0 is empty
+		{"héllo", 4, "hél…"},             // rune-aware
+		{"hello world", 8.0, "hello w…"}, // a float count, as math returns
+		{"hello world", "8", "hello w…"}, // a numeric string
+		{"hello world", int64(8), "hello w…"},
+		{"hello world", 8.9, "hello w…"}, // truncated toward zero, as toInt does
 	}
 	for _, tt := range tests {
-		got := Truncate(tt.in, tt.n)
-		if got != tt.want {
-			t.Errorf("truncate(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
+		got, err := Truncate(tt.in, tt.n)
+		if err != nil {
+			t.Errorf("truncate(%q, %v): %v", tt.in, tt.n, err)
+			continue
 		}
+		if got != tt.want {
+			t.Errorf("truncate(%q, %v) = %q, want %q", tt.in, tt.n, got, tt.want)
+		}
+	}
+
+	if _, err := Truncate("hello", "eight"); err == nil {
+		t.Error("Truncate with a non-numeric length: expected an error")
 	}
 }

@@ -46,18 +46,18 @@ func TestDict(t *testing.T) {
 
 func TestSeq(t *testing.T) {
 	cases := []struct {
-		args []int
+		args []any
 		want []int
 	}{
-		{[]int{5}, []int{1, 2, 3, 4, 5}},
-		{[]int{1}, []int{1}},
-		{[]int{0}, []int{}},
-		{[]int{3, 7}, []int{3, 4, 5, 6, 7}},
-		{[]int{5, 5}, []int{5}},
-		{[]int{7, 3}, []int{}},
-		{[]int{1, 10, 2}, []int{1, 3, 5, 7, 9}},
-		{[]int{5, 1, -1}, []int{5, 4, 3, 2, 1}},
-		{[]int{0, 6, 3}, []int{0, 3, 6}},
+		{[]any{5}, []int{1, 2, 3, 4, 5}},
+		{[]any{1}, []int{1}},
+		{[]any{0}, []int{}},
+		{[]any{3, 7}, []int{3, 4, 5, 6, 7}},
+		{[]any{5, 5}, []int{5}},
+		{[]any{7, 3}, []int{}},
+		{[]any{1, 10, 2}, []int{1, 3, 5, 7, 9}},
+		{[]any{5, 1, -1}, []int{5, 4, 3, 2, 1}},
+		{[]any{0, 6, 3}, []int{0, 3, 6}},
 	}
 	for _, c := range cases {
 		got, err := Seq(c.args...)
@@ -86,7 +86,7 @@ func TestSeq(t *testing.T) {
 // range, so a wide span with a large step is still fine.
 func TestSeq_lengthLimit(t *testing.T) {
 	t.Run("at the limit", func(t *testing.T) {
-		for _, args := range [][]int{
+		for _, args := range [][]any{
 			{MaxSeqLen},
 			{1, MaxSeqLen},
 			{0, 2*MaxSeqLen - 2, 2},
@@ -103,7 +103,7 @@ func TestSeq_lengthLimit(t *testing.T) {
 	})
 
 	t.Run("one past the limit", func(t *testing.T) {
-		for _, args := range [][]int{
+		for _, args := range [][]any{
 			{MaxSeqLen + 1},
 			{1, MaxSeqLen + 1},
 			{0, 2 * MaxSeqLen, 2},
@@ -130,7 +130,7 @@ func TestSeq_lengthLimit(t *testing.T) {
 // seqLen, end-start+1 wrapped: seq (math.MinInt) (math.MaxInt) computed a count
 // of 0 and silently returned nothing rather than refusing an impossible request.
 func TestSeq_countDoesNotOverflow(t *testing.T) {
-	cases := [][]int{
+	cases := [][]any{
 		{math.MinInt, math.MaxInt},
 		{math.MinInt, math.MaxInt, 1},
 		{math.MaxInt, math.MinInt, -1},
@@ -151,13 +151,13 @@ func TestSeq_countDoesNotOverflow(t *testing.T) {
 // MaxInt-1 around to MinInt and satisfied v <= end again.
 func TestSeq_stepOverflowTerminates(t *testing.T) {
 	cases := []struct {
-		args []int
+		args []any
 		want []int
 	}{
-		{[]int{math.MaxInt - 1, math.MaxInt, 2}, []int{math.MaxInt - 1}},
-		{[]int{math.MaxInt - 1, math.MaxInt, math.MaxInt}, []int{math.MaxInt - 1}},
-		{[]int{math.MinInt + 1, math.MinInt, -2}, []int{math.MinInt + 1}},
-		{[]int{math.MinInt, math.MinInt, math.MinInt}, []int{math.MinInt}},
+		{[]any{math.MaxInt - 1, math.MaxInt, 2}, []int{math.MaxInt - 1}},
+		{[]any{math.MaxInt - 1, math.MaxInt, math.MaxInt}, []int{math.MaxInt - 1}},
+		{[]any{math.MinInt + 1, math.MinInt, -2}, []int{math.MinInt + 1}},
+		{[]any{math.MinInt, math.MinInt, math.MinInt}, []int{math.MinInt}},
 	}
 	for _, c := range cases {
 		got, err := Seq(c.args...)
@@ -327,17 +327,65 @@ func TestSequenceAccess_htmlTemplateDowngrade(t *testing.T) {
 	}
 }
 
+// The string functions accept an html/template typed value for the same reason
+// take and drop do — asString classifies by kind — and must downgrade it the
+// same way. Lowercasing or truncating markup produces text that is no longer
+// the markup that was vouched for, so the result is a plain string and
+// html/template escapes it for wherever it lands. Failing closed matters most
+// for the URL case: lower "JAVASCRIPT:..." is not a URL anyone approved.
+func TestStringFuncs_htmlTemplateDowngrade(t *testing.T) {
+	cases := []struct {
+		name string
+		tmpl string
+		data any
+		want string
+	}{
+		{"lower escapes markup", `{{ lower . }}`,
+			htmltemplate.HTML("<B>Hi</B>"), "&lt;b&gt;hi&lt;/b&gt;"},
+		{"truncate escapes markup", `{{ truncate . 6 }}`,
+			htmltemplate.HTML("<b>hi</b>"), "&lt;b&gt;hi…"},
+		{"trim escapes markup", `{{ trim . }}`,
+			htmltemplate.HTML("  <b>hi</b>  "), "&lt;b&gt;hi&lt;/b&gt;"},
+		{"firstUpper escapes markup", `{{ firstUpper . }}`,
+			htmltemplate.HTML("<b>hi</b>"), "&lt;b&gt;hi&lt;/b&gt;"},
+		// A URL that went through a string function is no longer a trusted URL.
+		{"lowered URL neutralized", `<a href="{{ lower . }}">`,
+			htmltemplate.URL("JAVASCRIPT:alert(1)"), `<a href="#ZgotmplZ">`},
+		{"replaced URL neutralized", `<a href="{{ replaceAll . "x" "y" }}">`,
+			htmltemplate.URL("javascript:alert(1)"), `<a href="#ZgotmplZ">`},
+		// urlEncode percent-encodes the markup rather than passing it through.
+		{"urlEncode encodes markup", `{{ urlEncode . }}`,
+			htmltemplate.HTML("<b>"), "%3Cb%3E"},
+	}
+	for _, c := range cases {
+		tmpl, err := htmltemplate.New(c.name).
+			Funcs(htmltemplate.FuncMap(FuncMap())).Parse(c.tmpl)
+		if err != nil {
+			t.Errorf("%s: parse: %v", c.name, err)
+			continue
+		}
+		var sb strings.Builder
+		if err := tmpl.Execute(&sb, c.data); err != nil {
+			t.Errorf("%s: execute: %v", c.name, err)
+			continue
+		}
+		if sb.String() != c.want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, sb.String(), c.want)
+		}
+	}
+}
+
 func TestTake(t *testing.T) {
 	cases := []struct {
 		v    any
 		n    int
 		want any
 	}{
-		{[]int{1, 2, 3, 4, 5}, 3, []any{1, 2, 3}},
-		{[]int{1, 2, 3}, 0, []any{}},
-		{[]int{1, 2, 3}, 10, []any{1, 2, 3}},    // n > len: clamp
-		{[]int{1, 2, 3, 4, 5}, -2, []any{4, 5}}, // last 2
-		{[]int{1, 2, 3}, -10, []any{1, 2, 3}},   // |n| > len: clamp
+		{[]any{1, 2, 3, 4, 5}, 3, []any{1, 2, 3}},
+		{[]any{1, 2, 3}, 0, []any{}},
+		{[]any{1, 2, 3}, 10, []any{1, 2, 3}},    // n > len: clamp
+		{[]any{1, 2, 3, 4, 5}, -2, []any{4, 5}}, // last 2
+		{[]any{1, 2, 3}, -10, []any{1, 2, 3}},   // |n| > len: clamp
 		{"hello", 3, "hel"},
 		{"日本語", 2, "日本"},     // rune-aware
 		{"hi", 10, "hi"},     // n > len: clamp
@@ -362,11 +410,11 @@ func TestDrop(t *testing.T) {
 		n    int
 		want any
 	}{
-		{[]int{1, 2, 3, 4, 5}, 2, []any{3, 4, 5}},
-		{[]int{1, 2, 3}, 0, []any{1, 2, 3}},
-		{[]int{1, 2, 3}, 10, []any{}},              // n > len: empty
-		{[]int{1, 2, 3, 4, 5}, -2, []any{1, 2, 3}}, // remove last 2
-		{[]int{1, 2, 3}, -10, []any{}},             // |n| > len: empty
+		{[]any{1, 2, 3, 4, 5}, 2, []any{3, 4, 5}},
+		{[]any{1, 2, 3}, 0, []any{1, 2, 3}},
+		{[]any{1, 2, 3}, 10, []any{}},              // n > len: empty
+		{[]any{1, 2, 3, 4, 5}, -2, []any{1, 2, 3}}, // remove last 2
+		{[]any{1, 2, 3}, -10, []any{}},             // |n| > len: empty
 		{"hello", 2, "llo"},
 		{"日本語", 1, "本語"},    // rune-aware
 		{"hi", 10, ""},      // n > len: empty
@@ -1481,9 +1529,11 @@ func TestFunctionsReturnEmptyNotNil(t *testing.T) {
 			{"Dict no args", func() (any, error) { return Dict() }},
 			{"MergeMaps no args", func() (any, error) { return MergeMaps() }},
 			{"MergeMaps empty maps", func() (any, error) { return MergeMaps(map[string]any{}) }},
-			// split and fields are registered as strings.Split and strings.Fields.
-			// They satisfy the rule today; these pin it so that swapping in a
-			// custom implementation cannot quietly break it.
+			// split and fields are strings.Split and strings.Fields behind an
+			// argument adapter that passes the result through untouched, so the
+			// stdlib functions are what has to satisfy the rule. They do today;
+			// these pin it so that swapping in a custom implementation cannot
+			// quietly break it.
 			{"split empty string", func() (any, error) { return strings.Split("", ""), nil }},
 			{"split empty on sep", func() (any, error) { return strings.Split("", ","), nil }},
 			{"fields empty string", func() (any, error) { return strings.Fields(""), nil }},
@@ -1765,7 +1815,7 @@ func TestIsZero_nonStructsUnchanged(t *testing.T) {
 		{uint(0), true}, {uint(1), false},
 		{0.0, true}, {1.5, false},
 		{"", true}, {"x", false},
-		{[]int{}, true}, {[]int{1}, false},
+		{[]any{}, true}, {[]int{1}, false},
 		{map[string]any{}, true}, {map[string]any{"a": 1}, false},
 		{(*int)(nil), true},
 		{time.Duration(0), true}, {time.Second, false},

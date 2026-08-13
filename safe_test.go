@@ -110,16 +110,11 @@ func TestSafeString_inputs(t *testing.T) {
 }
 
 func TestURLEscape(t *testing.T) {
-	fm := FuncMap()
-
-	urlEncode := fm["urlEncode"].(func(string) string)
-	urlPathEscape := fm["urlPathEscape"].(func(string) string)
-
-	if got := urlEncode("a b&c=d"); got != "a+b%26c%3Dd" {
+	if got := URLEncode("a b&c=d"); got != "a+b%26c%3Dd" {
 		t.Errorf("urlEncode: got %q", got)
 	}
 	// PathEscape targets a single segment: / is encoded too
-	if got := urlPathEscape("foo bar/baz"); got != "foo%20bar%2Fbaz" {
+	if got := URLPathEscape("foo bar/baz"); got != "foo%20bar%2Fbaz" {
 		t.Errorf("urlPathEscape: got %q", got)
 	}
 }
