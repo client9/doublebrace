@@ -25,7 +25,7 @@ t := template.New("foo").Funcs(doublebrace.FuncMap())
 - strings — case, trim, search, replace, split/join, truncate, rune-aware length
 - math — arithmetic, rounding, min/max, clamp, pow
 - cast — `toInt`, `toFloat` for frontmatter values that arrive as strings
-- encoding — `jsonify` for embedding data in `<script>` blocks
+- encoding — `jsonify` for JSON output and `data-` attributes (inside `<script>`, `html/template` already emits JSON from a bare `{{ . }}`)
 - date and time — `now`, `parseTime`; use `time.Time` methods for formatting
 - url / safe types — `urlEncode`, `urlPathEscape`, `safeHTML`, `safeCSS`, etc.
 - path — `pathBase`, `pathDir`, `pathExt`, `pathJoin`, `pathClean`

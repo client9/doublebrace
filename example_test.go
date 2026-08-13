@@ -479,6 +479,24 @@ func ExampleFirstUpper() {
 	// Élan
 }
 
+func ExampleRepeat() {
+	v, _ := doublebrace.Repeat("ab", 3)
+	fmt.Println(v)
+	// Output: ababab
+}
+
+// A count that comes from data can be anything, so repeat reports a negative or
+// oversized one rather than panicking or allocating for it.
+func ExampleRepeat_limits() {
+	_, err := doublebrace.Repeat("-", -1)
+	fmt.Println(err)
+	_, err = doublebrace.Repeat("-", doublebrace.MaxRepeatLen+1)
+	fmt.Println(err)
+	// Output:
+	// repeat: negative count (-1)
+	// repeat: 10001 copies of a 1-rune string exceeds the limit of 10000 runes
+}
+
 func ExampleTruncate() {
 	fmt.Println(doublebrace.Truncate("hello world", 8))
 	fmt.Println(doublebrace.Truncate("hi", 8))

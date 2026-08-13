@@ -47,7 +47,7 @@
 //   - count(s, substr) int — count non-overlapping instances of substr in s; "" counts runes+1 (strings.Count)
 //   - replace(s, old, repl [, n]) string — replace first occurrence of old with repl; optional n sets limit (-1 replaces all)
 //   - replaceAll(s, old, repl) string — replace all occurrences of old with repl (strings.ReplaceAll)
-//   - repeat(s, n) string — return n copies of s concatenated (strings.Repeat)
+//   - repeat(s, n) string — return n copies of s concatenated; at most MaxRepeatLen runes, and a negative n is an error
 //   - split(s, sep) []string — split s into substrings separated by sep (strings.Split)
 //   - join(elems, sep) string — join elements with sep; accepts any slice or array, non-strings via fmt.Sprint
 //   - fields(s) []string — split s on whitespace, discarding empty strings (strings.Fields)
@@ -155,7 +155,9 @@
 //
 // A sequence may not exceed MaxSeqLen elements; a longer request is an error
 // rather than an allocation. The limit is on the element count, not the numeric
-// range, so a wide span with a large step is fine.
+// range, so a wide span with a large step is fine. repeat is bounded the same
+// way by MaxRepeatLen — wherever a count can come from data, a mistyped or
+// hostile one is an error rather than an allocation.
 //
 // # Collections — Sequence Access
 //
