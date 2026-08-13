@@ -118,33 +118,82 @@ func toSlice(v any) ([]any, error) {
 	return out, nil
 }
 
-// fieldString returns the string representation of a named field in a
-// map[string]any element. It errors when the element is not a map or the key is
-// absent: returning "" instead would make every element compare equal, so a
-// mistyped key or a slice of non-maps would silently yield unsorted output
-// rather than a diagnosable failure.
-func fieldString(v any, key string) (string, error) {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return "", fmt.Errorf("element is not map[string]any, got %T", v)
+// fieldValue reads the field named key from a collection element, for the
+// key-taking forms of where, sort, and sortNum.
+//
+// An element may be a map with string-kind keys or a struct, or a pointer to
+// either. Requiring map[string]any meant a plain []Page — the ordinary way to
+// hand Go data to a template — could not be filtered or sorted by field at all,
+// though it is exactly the shape the doc examples read as though they accept.
+//
+// Struct fields match by exact name and must be exported. FieldByName also
+// resolves promoted fields of embedded structs, so a field reached through
+// embedding works without naming the embedded type. Method calls are
+// deliberately not supported: reading a field is inert, whereas invoking
+// arbitrary methods named by template data is a different thing to hand a
+// template author.
+//
+// An absent key is an error rather than a zero value. Returning "" or nil would
+// make every element compare equal, so a mistyped key would silently yield
+// unsorted output or an empty filter instead of a diagnosable failure.
+func fieldValue(elem any, key string) (any, error) {
+	if m, ok := elem.(map[string]any); ok {
+		val, exists := m[key]
+		if !exists {
+			return nil, fmt.Errorf("field %q not found", key)
+		}
+		return val, nil
 	}
-	val, exists := m[key]
-	if !exists {
-		return "", fmt.Errorf("field %q not found", key)
+	rv := reflect.ValueOf(elem)
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil, fmt.Errorf("field %q: element is a nil %s", key, rv.Type())
+		}
+		rv = rv.Elem()
+	}
+	switch rv.Kind() {
+	case reflect.Map:
+		kt := rv.Type().Key()
+		if kt.Kind() != reflect.String {
+			return nil, fmt.Errorf("field %q: element has %s keys, want string", key, kt)
+		}
+		// Convert so a named key type (map[Slug]string) indexes correctly.
+		got := rv.MapIndex(reflect.ValueOf(key).Convert(kt))
+		if !got.IsValid() {
+			return nil, fmt.Errorf("field %q not found", key)
+		}
+		return got.Interface(), nil
+	case reflect.Struct:
+		f := rv.FieldByName(key)
+		if !f.IsValid() {
+			return nil, fmt.Errorf("field %q not found", key)
+		}
+		if !f.CanInterface() {
+			// reflect finds unexported fields but panics on Interface().
+			// Reporting beats faulting midway through rendering a page.
+			return nil, fmt.Errorf("field %q is unexported", key)
+		}
+		return f.Interface(), nil
+	}
+	return nil, fmt.Errorf("element is not a map or struct, got %T", elem)
+}
+
+// fieldString returns the string representation of a named field in a
+// collection element.
+func fieldString(v any, key string) (string, error) {
+	val, err := fieldValue(v, key)
+	if err != nil {
+		return "", err
 	}
 	return fmt.Sprint(val), nil
 }
 
-// fieldNumber returns the numeric value of a named field in a map[string]any
+// fieldNumber returns the numeric value of a named field in a collection
 // element, ready for number.compare.
 func fieldNumber(v any, key string) (number, error) {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return number{}, fmt.Errorf("element is not map[string]any, got %T", v)
-	}
-	val, exists := m[key]
-	if !exists {
-		return number{}, fmt.Errorf("field %q not found", key)
+	val, err := fieldValue(v, key)
+	if err != nil {
+		return number{}, err
 	}
 	return toNumber(val)
 }
@@ -778,8 +827,9 @@ func inferSortMode(elems []any) sortMode {
 //   - everything else sorts lexicographically (string comparison)
 //
 // For []any, the first non-nil element determines the sort mode.
-// An optional key names a field for slice-of-maps sorting (always lexicographic);
-// it is an error if any element is not a map[string]any or lacks that key.
+// An optional key names a field on each element (always lexicographic); the
+// element may be a struct, a pointer to one, or a map with string-kind keys.
+// It is an error if any element cannot supply that field — see fieldValue.
 // For descending order, compose with reverse.
 // ISO 8601 date strings ("2006-01-02") sort correctly lexicographically.
 //
@@ -831,9 +881,9 @@ func Sort(v any, key ...string) ([]any, error) {
 
 // SortNum returns a new slice sorted numerically, converting each element to a
 // number — so numeric strings sort by value rather than as text.
-// An optional key names a field for slice-of-maps sorting. It is an error if any
-// element cannot be converted, or — with a key — is not a map[string]any or lacks
-// that key.
+// An optional key names a field on each element, which may be a struct, a
+// pointer to one, or a map with string-kind keys. It is an error if any element
+// cannot be converted, or — with a key — cannot supply that field.
 // For descending order, compose with reverse.
 //
 // Values that are already numeric are ordered exactly, whatever their width; a
@@ -866,13 +916,15 @@ func SortNum(v any, key ...string) ([]any, error) {
 	}, number.compare)
 }
 
-// Where filters a slice of map[string]any by field equality.
-// Only elements where element[key] equals val are included in the result.
+// Where filters a slice by field equality. Only elements whose named field
+// equals val are included in the result. An element may be a struct, a pointer
+// to one, or a map with string-kind keys, so a plain []Page filters as readily
+// as a []map[string]any decoded from JSON.
 //
 // Numbers compare by value regardless of type, so a field decoded from JSON as
-// float64 matches an integer literal. It is an error if any element is not a
-// map[string]any or lacks the named field — a missing field would otherwise drop
-// every element and look like data that simply did not match.
+// float64 matches an integer literal. It is an error if any element cannot
+// supply the named field — a missing one would otherwise drop every element and
+// look like data that simply did not match.
 //
 //	where $pages "Draft" false    → pages where Draft == false
 //	where $pages "Section" "blog" → pages in the blog section
@@ -884,16 +936,12 @@ func Where(v any, key string, val any) ([]any, error) {
 	}
 	out := make([]any, 0, len(elems))
 	for _, elem := range elems {
-		m, ok := elem.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("where: elements must be map[string]any, got %T", elem)
-		}
-		got, exists := m[key]
-		if !exists {
-			// A missing field would compare unequal and quietly drop the element,
-			// making a typo in the key indistinguishable from data that matched
-			// nothing. Sort reports this the same way.
-			return nil, fmt.Errorf("where: field %q not found", key)
+		// A missing field is an error, not a non-match: it would quietly drop
+		// the element, making a typo in the key indistinguishable from data that
+		// matched nothing. Sort reports this the same way.
+		got, err := fieldValue(elem, key)
+		if err != nil {
+			return nil, fmt.Errorf("where: %w", err)
 		}
 		if valuesEqual(got, val) {
 			out = append(out, elem)
@@ -904,50 +952,107 @@ func Where(v any, key string, val any) ([]any, error) {
 
 // --- map operations ---
 
-// Keys returns the keys of a map[string]any in sorted order.
+// stringKeyedMap returns the reflect value of a map with string-kind keys,
+// along with its sorted keys.
 //
-//	keys map[string]any{"b": 2, "a": 1} → ["a" "b"]
-func Keys(v any) ([]string, error) {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("keys: expected map[string]any, got %T", v)
+// Any value type is accepted — map[string]string and map[string]int are as
+// ordinary in template data as map[string]any — and so is a named key type
+// (map[Slug]int), because reflect classifies by kind the way asString and
+// isSequence do.
+//
+// The key kind must be a string, which is where this stops short of In. In
+// accepts any key type because it only probes for one key; keys and values have
+// to put the keys in an order, and there is no ordering rule here that spans
+// kinds. Widening that means deciding how an int key sorts against a string one,
+// and changing what Keys returns.
+func stringKeyedMap(v any, what string) (reflect.Value, []string, error) {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() || rv.Kind() != reflect.Map {
+		return reflect.Value{}, nil, fmt.Errorf("%s: expected a map, got %T", what, v)
 	}
-	if len(m) == 0 {
-		// slices.Sorted collects into a nil slice, so an empty map would yield
-		// nil rather than an empty slice.
-		return []string{}, nil
+	if kt := rv.Type().Key(); kt.Kind() != reflect.String {
+		return reflect.Value{}, nil, fmt.Errorf("%s: map has %s keys, want string", what, kt)
 	}
-	return slices.Sorted(maps.Keys(m)), nil
+	// Always non-nil: an empty map must yield an empty slice, not nil.
+	keys := make([]string, 0, rv.Len())
+	for _, k := range rv.MapKeys() {
+		keys = append(keys, k.String())
+	}
+	slices.Sort(keys)
+	return rv, keys, nil
 }
 
-// Values returns the values of a map[string]any in key-sorted order.
+// Keys returns the keys of a map in sorted order. The map may have any value
+// type and any string-kind key type.
+//
+//	keys map[string]any{"b": 2, "a": 1}    → ["a" "b"]
+//	keys map[string]string{"b": "2"}       → ["b"]
+func Keys(v any) ([]string, error) {
+	// The concrete case is the common one and skips reflect entirely.
+	if m, ok := v.(map[string]any); ok {
+		if len(m) == 0 {
+			// slices.Sorted collects into a nil slice, so an empty map would
+			// yield nil rather than an empty slice.
+			return []string{}, nil
+		}
+		return slices.Sorted(maps.Keys(m)), nil
+	}
+	_, keys, err := stringKeyedMap(v, "keys")
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+// Values returns the values of a map in key-sorted order. The map may have any
+// value type and any string-kind key type.
 //
 //	values map[string]any{"b": 2, "a": 1} → [1 2]
 func Values(v any) ([]any, error) {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("values: expected map[string]any, got %T", v)
+	if m, ok := v.(map[string]any); ok {
+		ks := slices.Sorted(maps.Keys(m))
+		out := make([]any, len(ks))
+		for i, k := range ks {
+			out[i] = m[k]
+		}
+		return out, nil
 	}
-	ks := slices.Sorted(maps.Keys(m))
-	out := make([]any, len(ks))
-	for i, k := range ks {
-		out[i] = m[k]
+	rv, keys, err := stringKeyedMap(v, "values")
+	if err != nil {
+		return nil, err
+	}
+	kt := rv.Type().Key()
+	out := make([]any, len(keys))
+	for i, k := range keys {
+		out[i] = rv.MapIndex(reflect.ValueOf(k).Convert(kt)).Interface()
 	}
 	return out, nil
 }
 
-// MergeMaps combines map[string]any maps into a new map. Later maps win on
-// key collision. Registered as "merge" in the template FuncMap.
+// MergeMaps combines maps into a new map[string]any. Later maps win on key
+// collision. Registered as "merge" in the template FuncMap.
+//
+// Arguments may have any value type and any string-kind key type, and need not
+// agree with each other: merging a map[string]string with a map[string]any is
+// how a typed config map and a dict literal combine. Values widen to any, which
+// is why the result is always map[string]any whatever went in.
 //
 //	merge (dict "a" 1 "b" 2) (dict "b" 99 "c" 3) → {"a":1, "b":99, "c":3}
 func MergeMaps(mapsIn ...any) (map[string]any, error) {
 	out := make(map[string]any)
 	for i, v := range mapsIn {
-		m, ok := v.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("merge: argument %d must be map[string]any, got %T", i, v)
+		if m, ok := v.(map[string]any); ok {
+			maps.Copy(out, m)
+			continue
 		}
-		maps.Copy(out, m)
+		rv, keys, err := stringKeyedMap(v, fmt.Sprintf("merge: argument %d", i))
+		if err != nil {
+			return nil, err
+		}
+		kt := rv.Type().Key()
+		for _, k := range keys {
+			out[k] = rv.MapIndex(reflect.ValueOf(k).Convert(kt)).Interface()
+		}
 	}
 	return out, nil
 }

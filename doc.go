@@ -186,13 +186,20 @@
 //   - reverse(v) []any — new slice in reverse order
 //   - compact(v) []any — remove consecutive duplicate elements; numbers compare by value across types; for full dedup: compact (sort $list)
 //   - concat(slices...) []any — concatenate multiple slices into one
-//   - sort(v [, key]) []any — type-aware sort: numeric types sort numerically, time.Time sorts chronologically, everything else sorts lexicographically; for []any the first non-nil element determines mode; key names a field for slice-of-maps (always lexicographic)
-//   - sortNum(v [, key]) []any — numeric sort, including numeric strings; key names a field for slice-of-maps
-//   - where(v, key, val) []any — filter slice of map[string]any where element[key] equals val; numbers compare by value across types; a missing field is an error
+//   - sort(v [, key]) []any — type-aware sort: numeric types sort numerically, time.Time sorts chronologically, everything else sorts lexicographically; for []any the first non-nil element determines mode; key names a field on each element (always lexicographic)
+//   - sortNum(v [, key]) []any — numeric sort, including numeric strings; key names a field on each element
+//   - where(v, key, val) []any — filter a slice by field equality; numbers compare by value across types; a missing field is an error
 //
 // For descending order compose with reverse: reverse (sort $pages "Title")
 //
 // ISO 8601 date strings ("2006-01-02") sort correctly with lexicographic order.
+//
+// The key forms of sort, sortNum, and where read a named field from each
+// element. An element may be a struct or a pointer to one, or a map with any
+// string-kind key — so a plain []Page works, not only []map[string]any. Struct
+// fields match by exact name, must be exported, and may be promoted from an
+// embedded struct. Methods are not called. A missing, unexported, or
+// unreadable field is an error rather than a silent non-match.
 //
 // Numeric ordering is exact at every magnitude. Integers wider than a float64's
 // 53-bit mantissa — database IDs and timestamps in nanoseconds, most often —
@@ -202,9 +209,14 @@
 //
 // # Collections — Map Operations
 //
-//   - keys(m) []string — sorted keys of a map[string]any
-//   - values(m) []any — values of a map[string]any ordered by sorted keys
+//   - keys(m) []string — sorted keys of a map
+//   - values(m) []any — values of a map ordered by sorted keys
 //   - merge(maps...) map[string]any — shallow merge; later maps win on key collision
+//
+// These accept a map with any value type and any string-kind key, so
+// map[string]string and map[Slug]int work alongside map[string]any. The key
+// must be a string kind because these order the keys; in accepts any key type
+// because it only probes for one.
 //
 // # Collections — General
 //

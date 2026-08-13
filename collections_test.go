@@ -1012,15 +1012,214 @@ func TestToSlice_rejectsNonSequences(t *testing.T) {
 // Sorting by key must fail loudly on elements it cannot read. Returning the
 // input untouched would look like a successful sort while producing wrong
 // output — see fieldString.
+// keys, values, and merge took map[string]any only, so a map[string]string —
+// which in already searched happily — could not be listed or combined.
+func TestMapOps_anyStringKeyedMap(t *testing.T) {
+	ss := map[string]string{"b": "2", "a": "1"}
+	si := map[string]int{"b": 2, "a": 1}
+	named := map[Slug]int{"b": 2, "a": 1}
+
+	for _, c := range []struct {
+		name string
+		in   any
+		keys []string
+		vals []any
+	}{
+		{"map[string]any", map[string]any{"b": 2, "a": 1}, []string{"a", "b"}, []any{1, 2}},
+		{"map[string]string", ss, []string{"a", "b"}, []any{"1", "2"}},
+		{"map[string]int", si, []string{"a", "b"}, []any{1, 2}},
+		{"named key type", named, []string{"a", "b"}, []any{1, 2}},
+	} {
+		gotKeys, err := Keys(c.in)
+		if err != nil {
+			t.Errorf("%s: Keys: %v", c.name, err)
+		} else if !reflect.DeepEqual(gotKeys, c.keys) {
+			t.Errorf("%s: Keys = %v, want %v", c.name, gotKeys, c.keys)
+		}
+		gotVals, err := Values(c.in)
+		if err != nil {
+			t.Errorf("%s: Values: %v", c.name, err)
+		} else if !reflect.DeepEqual(gotVals, c.vals) {
+			t.Errorf("%s: Values = %v, want %v", c.name, gotVals, c.vals)
+		}
+	}
+
+	// Maps of different types merge, widening to map[string]any.
+	merged, err := MergeMaps(ss, map[string]any{"c": 3}, si)
+	if err != nil {
+		t.Fatalf("MergeMaps: %v", err)
+	}
+	want := map[string]any{"a": 1, "b": 2, "c": 3}
+	if !reflect.DeepEqual(merged, want) {
+		t.Errorf("MergeMaps = %v, want %v", merged, want)
+	}
+
+	// Empty maps still yield empty, non-nil results.
+	for _, empty := range []any{map[string]string{}, map[Slug]int{}} {
+		k, err := Keys(empty)
+		if err != nil || k == nil || len(k) != 0 {
+			t.Errorf("Keys(%T{}) = %v, %v; want empty non-nil", empty, k, err)
+		}
+		v, err := Values(empty)
+		if err != nil || v == nil || len(v) != 0 {
+			t.Errorf("Values(%T{}) = %v, %v; want empty non-nil", empty, v, err)
+		}
+	}
+
+	// Non-string keys are still refused: in probes one key, but these must order
+	// them, and there is no rule spanning kinds.
+	for _, bad := range []any{map[int]string{1: "a"}, []string{"a"}, "abc", nil} {
+		if _, err := Keys(bad); err == nil {
+			t.Errorf("Keys(%T): expected an error", bad)
+		}
+		if _, err := Values(bad); err == nil {
+			t.Errorf("Values(%T): expected an error", bad)
+		}
+		if _, err := MergeMaps(bad); err == nil {
+			t.Errorf("MergeMaps(%T): expected an error", bad)
+		}
+	}
+}
+
+// Embedded, to check that a promoted field is reachable without naming the
+// embedded type.
+type meta struct{ Section string }
+
+type article struct {
+	meta
+	Title  string
+	Year   int
+	Draft  bool
+	hidden string //nolint:unused // present to assert unexported fields are refused
+}
+
+// where, sort, and sortNum took the field name from a map[string]any element
+// only, so a plain []Page — the shape the doc examples read as though they
+// accept — could not be filtered or sorted at all. Structs, pointers to them,
+// and maps with any string-kind key now work the same way.
+func TestFieldAccess_structsAndTypedMaps(t *testing.T) {
+	articles := []article{
+		{meta{"blog"}, "Cherry", 2022, false, "x"},
+		{meta{"docs"}, "Apple", 2020, true, "y"},
+		{meta{"blog"}, "Banana", 2021, false, "z"},
+	}
+
+	// sort by a struct field
+	got, err := Sort(articles, "Title")
+	if err != nil {
+		t.Fatalf("Sort by struct field: %v", err)
+	}
+	if titles := articleTitles(t, got); !reflect.DeepEqual(titles, []string{"Apple", "Banana", "Cherry"}) {
+		t.Errorf("Sort by Title: got %v", titles)
+	}
+
+	// sortNum by a struct field
+	got, err = SortNum(articles, "Year")
+	if err != nil {
+		t.Fatalf("SortNum by struct field: %v", err)
+	}
+	if titles := articleTitles(t, got); !reflect.DeepEqual(titles, []string{"Apple", "Banana", "Cherry"}) {
+		t.Errorf("SortNum by Year: got %v", titles)
+	}
+
+	// where on a struct field, including a bool and a promoted embedded field
+	got, err = Where(articles, "Draft", false)
+	if err != nil {
+		t.Fatalf("Where on struct field: %v", err)
+	}
+	if titles := articleTitles(t, got); !reflect.DeepEqual(titles, []string{"Cherry", "Banana"}) {
+		t.Errorf("Where Draft=false: got %v", titles)
+	}
+	got, err = Where(articles, "Section", "blog")
+	if err != nil {
+		t.Fatalf("Where on promoted field: %v", err)
+	}
+	if titles := articleTitles(t, got); !reflect.DeepEqual(titles, []string{"Cherry", "Banana"}) {
+		t.Errorf("Where Section=blog (promoted): got %v", titles)
+	}
+
+	// pointers to structs
+	ptrs := []*article{&articles[0], &articles[1], &articles[2]}
+	got, err = Sort(ptrs, "Title")
+	if err != nil {
+		t.Fatalf("Sort []*struct: %v", err)
+	}
+	if got[0].(*article).Title != "Apple" {
+		t.Errorf("Sort []*struct: first = %q, want Apple", got[0].(*article).Title)
+	}
+
+	// maps whose value type is not any, and whose key type is a named string
+	typed := []map[string]string{{"Title": "Cherry"}, {"Title": "Apple"}}
+	got, err = Sort(typed, "Title")
+	if err != nil {
+		t.Fatalf("Sort []map[string]string: %v", err)
+	}
+	if got[0].(map[string]string)["Title"] != "Apple" {
+		t.Errorf("Sort []map[string]string: got %v", got)
+	}
+	namedKey := []map[Slug]int{{"Year": 2022}, {"Year": 2020}}
+	got, err = SortNum(namedKey, "Year")
+	if err != nil {
+		t.Fatalf("SortNum []map[Slug]int: %v", err)
+	}
+	if got[0].(map[Slug]int)["Year"] != 2020 {
+		t.Errorf("SortNum []map[Slug]int: got %v", got)
+	}
+}
+
+// reflect finds an unexported field but panics on Interface(), so the guard has
+// to report rather than let a render fault. A nil pointer element likewise.
+func TestFieldAccess_refusesUnexportedAndNil(t *testing.T) {
+	in := []any{article{meta{"blog"}, "Cherry", 2022, false, "x"}}
+	for _, key := range []string{"hidden", "Missing"} {
+		if _, err := Where(in, key, "x"); err == nil {
+			t.Errorf("Where(_, %q, _): expected an error", key)
+		}
+		if _, err := Sort(in, key); err == nil {
+			t.Errorf("Sort(_, %q): expected an error", key)
+		}
+	}
+	if _, err := Where([]any{(*article)(nil)}, "Title", "x"); err == nil {
+		t.Error("Where on a nil pointer element: expected an error")
+	}
+	// A map with non-string keys cannot be addressed by a field name.
+	if _, err := Where([]any{map[int]string{1: "a"}}, "Title", "a"); err == nil {
+		t.Error("Where on a map[int]string element: expected an error")
+	}
+}
+
+func articleTitles(t *testing.T, elems []any) []string {
+	t.Helper()
+	out := make([]string, len(elems))
+	for i, e := range elems {
+		switch a := e.(type) {
+		case article:
+			out[i] = a.Title
+		case *article:
+			out[i] = a.Title
+		default:
+			t.Fatalf("unexpected element type %T", e)
+		}
+	}
+	return out
+}
+
 func TestSort_keyErrors(t *testing.T) {
-	type page struct{ Title string }
+	// A struct carrying the key is valid input now, so the invalid fixtures are
+	// elements that genuinely cannot answer for "Title": ones lacking it, ones
+	// that keep it unexported, and values with no fields at all.
+	type other struct{ Name string }
+	type unexported struct{ title string } //nolint:unused // read via reflect
 
 	cases := []struct {
 		name string
 		in   []any
 	}{
-		{"structs, not maps", []any{page{"Zebra"}, page{"Apple"}}},
-		{"single struct element", []any{page{"Zebra"}}},
+		{"struct without the key", []any{other{"Zebra"}, other{"Apple"}}},
+		{"single struct without the key", []any{other{"Zebra"}}},
+		{"unexported field", []any{unexported{"Zebra"}, unexported{"Apple"}}},
+		{"single unexported field", []any{unexported{"Zebra"}}},
+		{"nil pointer element", []any{(*other)(nil)}},
 		{"scalars", []any{"Zebra", "Apple"}},
 		{"key absent from element", []any{
 			map[string]any{"Title": "Zebra"},
@@ -1042,15 +1241,17 @@ func TestSort_keyErrors(t *testing.T) {
 // a one-element slice of unconvertible values was silently accepted while the
 // same template broke as soon as a second element arrived.
 func TestSortNum_errorsAreNotLengthDependent(t *testing.T) {
-	type page struct{ Year int }
+	// A struct whose Year is numeric now sorts, so the unconvertible fixture is
+	// a struct whose Year cannot be read as a number.
+	type page struct{ Year string }
 
 	cases := []struct {
 		name string
 		in   []any
 		key  []string
 	}{
-		{"one struct, keyed", []any{page{2020}}, []string{"Year"}},
-		{"two structs, keyed", []any{page{2020}, page{2021}}, []string{"Year"}},
+		{"one struct, non-numeric field", []any{page{"MMXX"}}, []string{"Year"}},
+		{"two structs, non-numeric field", []any{page{"MMXX"}, page{"MMXXI"}}, []string{"Year"}},
 		{"one map missing the key", []any{map[string]any{"X": 1}}, []string{"Year"}},
 		{"two maps missing the key", []any{
 			map[string]any{"X": 1}, map[string]any{"X": 2},
@@ -1073,8 +1274,10 @@ func TestSortNum_errorsAreNotLengthDependent(t *testing.T) {
 // Sort and SortNum sit next to each other and must agree on bad input, since
 // that is how the two drifted apart in the first place.
 func TestSortAndSortNum_agreeOnBadInput(t *testing.T) {
-	type page struct{ N int }
-	in := []any{page{1}} // single element: the case that used to differ
+	// A struct with the key is valid for both now, so bad input is a struct
+	// without it. Single element: the case that used to differ.
+	type page struct{ Other int }
+	in := []any{page{1}}
 
 	if _, err := Sort(in, "N"); err == nil {
 		t.Error("Sort([1 struct], \"N\"): expected an error")
