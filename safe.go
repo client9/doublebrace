@@ -56,6 +56,12 @@ func SafeCSS(s any) (template.CSS, error) {
 
 // SafeHTML converts s to template.HTML, marking it safe to render as raw HTML
 // without escaping. Use only with trusted content.
+//
+// Trusted is necessary but not sufficient: the markup must also be balanced.
+// html/template chooses how to escape the rest of the template by parsing its
+// text before any data exists, and never re-examines what a template.HTML value
+// emits, so a fragment ending mid-tag leaves later values escaped for a context
+// the browser is no longer in.
 func SafeHTML(s any) (template.HTML, error) {
 	str, err := safeString(s)
 	return template.HTML(str), err

@@ -119,6 +119,9 @@
 // All accept string, []byte, any html/template typed value, or any type via
 // fmt.Sprint. nil is an error.
 //
+// Marking a value safe turns off the protection html/template applies to it, so
+// the content must be trusted — and for safeHTML, balanced. See SafeHTML.
+//
 //   - safeCSS(s) template.CSS — mark s safe for style attributes and <style> blocks
 //   - safeHTML(s) template.HTML — mark s safe to render as raw HTML without escaping
 //   - safeHTMLAttr(s) template.HTMLAttr — mark s safe as an HTML attribute name/value pair
@@ -163,6 +166,12 @@
 //
 // These functions operate on any slice, array, or string. String operations are
 // rune-aware: multi-byte characters are never split.
+//
+// "String" means any value of string kind, so a named type (type Slug string)
+// and an html/template typed value both work, as they do with in. The result is
+// a plain string rather than the input's own type — slicing markup by runes can
+// cut a tag or an entity in half, so a truncated template.HTML is no longer
+// trusted markup and is escaped like any other string.
 //
 // They return any, rather than the []any returned elsewhere, because the result
 // follows the input: a string argument yields a string or a rune, not a slice.

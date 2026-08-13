@@ -7,6 +7,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	// Aliased because strings_test.go binds the name template to text/template;
+	// one identifier meaning two packages across one test package is a trap.
+	htmltemplate "html/template"
 )
 
 // --- constructors ---
@@ -196,6 +200,129 @@ func TestLast(t *testing.T) {
 	}
 	if _, err := Last([]int{}); err == nil {
 		t.Error("expected error for empty slice")
+	}
+}
+
+// A string is anything of string kind. in classified it that way through a
+// reflect switch while first, last, take, and drop type-asserted to string, so
+// a named type or an html/template value was searchable but not sliceable —
+// they failed with "expected slice or array", naming a type the caller never
+// passed.
+func TestSequenceAccess_namedStringTypes(t *testing.T) {
+	// Slug is declared in math_test.go; template.HTML is the shape that actually
+	// turns up in template data.
+	for _, v := range []any{Slug("héllo"), htmltemplate.HTML("héllo"), htmltemplate.CSS("héllo")} {
+		first, err := First(v)
+		if err != nil {
+			t.Errorf("First(%T): %v", v, err)
+		} else if first != "h" {
+			t.Errorf("First(%T) = %v, want %q", v, first, "h")
+		}
+
+		last, err := Last(v)
+		if err != nil {
+			t.Errorf("Last(%T): %v", v, err)
+		} else if last != "o" {
+			t.Errorf("Last(%T) = %v, want %q", v, last, "o")
+		}
+
+		// Rune-aware, not byte-aware: "é" is two bytes and must not be split.
+		take, err := Take(v, 2)
+		if err != nil {
+			t.Errorf("Take(%T): %v", v, err)
+		} else if take != "hé" {
+			t.Errorf("Take(%T, 2) = %v, want %q", v, take, "hé")
+		}
+
+		drop, err := Drop(v, 2)
+		if err != nil {
+			t.Errorf("Drop(%T): %v", v, err)
+		} else if drop != "llo" {
+			t.Errorf("Drop(%T, 2) = %v, want %q", v, drop, "llo")
+		}
+
+		// The result is a plain string, not the input's type: a rune-sliced
+		// template.HTML may have lost the back half of a tag and must not stay
+		// marked as trusted markup.
+		if _, ok := take.(string); !ok {
+			t.Errorf("Take(%T) returned %T, want string", v, take)
+		}
+
+		// in agreed all along; it must still agree.
+		got, err := In(v, "éll")
+		if err != nil {
+			t.Errorf("In(%T): %v", v, err)
+		} else if !got {
+			t.Errorf("In(%T, %q) = false, want true", v, "éll")
+		}
+	}
+
+	// The needle may be a named type too, now that both sides read the same way.
+	if got, err := In("hello", Slug("ell")); err != nil || !got {
+		t.Errorf(`In("hello", Slug("ell")) = %v, %v; want true, nil`, got, err)
+	}
+	// A non-string needle is still an error rather than a silent false.
+	if _, err := In("hello", 1); err == nil {
+		t.Error(`In("hello", 1): expected an error`)
+	}
+
+	// An empty named string reports the same errors an empty string does.
+	if _, err := First(Slug("")); err == nil {
+		t.Error(`First(Slug("")): expected an error`)
+	}
+	if _, err := Last(Slug("")); err == nil {
+		t.Error(`Last(Slug("")): expected an error`)
+	}
+}
+
+// Sequence access on an html/template typed value must return a plain string,
+// so html/template escapes the result for whatever context it lands in. This is
+// a security property, not a formatting one: a rune-sliced fragment can end
+// mid-tag, and markup that is no longer balanced cannot be trusted to render as
+// markup. Preserving the input's type would hand back a half-open tag still
+// marked as safe.
+//
+// Each case renders through html/template and asserts the value was neutralized.
+// ZgotmplZ is html/template's signal that it refused an unsafe value outright.
+func TestSequenceAccess_htmlTemplateDowngrade(t *testing.T) {
+	cases := []struct {
+		name string
+		tmpl string
+		data any
+		want string
+	}{
+		// Markup is escaped rather than rendered.
+		{"HTML in text", `{{ take . 3 }}`, htmltemplate.HTML("<b>hi</b>"), "&lt;b&gt;"},
+		{"HTML in attr", `<div title="{{ take . 3 }}">`, htmltemplate.HTML("<b>hi</b>"), `<div title="&lt;b&gt;">`},
+		{"first HTML", `{{ first . }}`, htmltemplate.HTML("<b>hi</b>"), "&lt;"},
+		{"drop HTML", `{{ drop . 6 }}`, htmltemplate.HTML("<b>hi</b>"), "/b&gt;"},
+		// A javascript: URL survives as template.URL but not as a plain string.
+		{"URL neutralized", `<a href="{{ take . 30 }}">`,
+			htmltemplate.URL("javascript:alert(1)"), `<a href="#ZgotmplZ">`},
+		// An event-handler attribute likewise.
+		{"HTMLAttr neutralized", `<div {{ take . 30 }}>`,
+			htmltemplate.HTMLAttr(`onclick="alert(1)"`), `<div ZgotmplZ>`},
+		{"CSS neutralized", `<style>{{ take . 20 }}</style>`,
+			htmltemplate.CSS("body{color:red}"), `<style>ZgotmplZ</style>`},
+		// JS becomes a quoted string rather than executable code.
+		{"JS becomes a string", `<script>var x = {{ take . 20 }}</script>`,
+			htmltemplate.JS("alert(1)"), `<script>var x = "alert(1)"</script>`},
+	}
+	for _, c := range cases {
+		tmpl, err := htmltemplate.New(c.name).
+			Funcs(htmltemplate.FuncMap(FuncMap())).Parse(c.tmpl)
+		if err != nil {
+			t.Errorf("%s: parse: %v", c.name, err)
+			continue
+		}
+		var sb strings.Builder
+		if err := tmpl.Execute(&sb, c.data); err != nil {
+			t.Errorf("%s: execute: %v", c.name, err)
+			continue
+		}
+		if sb.String() != c.want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, sb.String(), c.want)
+		}
 	}
 }
 

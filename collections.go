@@ -54,6 +54,36 @@ func isSequence(k reflect.Kind) bool {
 	return k == reflect.Slice || k == reflect.Array
 }
 
+// asString reports whether v is a string, returning its value. It is the
+// package-wide definition of "is this a string", the counterpart to isSequence:
+// a named type (type Slug string) or an html/template typed value is a string
+// here, because reflect classifies by kind and template data routinely carries
+// both.
+//
+// A type assertion to string is what this replaces. That accepted only the
+// unnamed type, which is why in — which reached the same value through a
+// reflect kind switch — could search a Slug that first, last, take, and drop
+// all rejected as "expected slice or array".
+//
+// The functions built on this return a plain string rather than the input's own
+// type. For an html/template value that is a security property, not a
+// convenience: slicing markup by runes can cut a tag or an entity in half, and
+// half a tag is not markup. Downgrading makes html/template escape the result
+// for whatever context it lands in, which is the fail-closed direction — a
+// truncated template.URL holding "javascript:" is rejected as a plain string
+// where the untruncated value would have been emitted as trusted.
+// TestSequenceAccess_htmlTemplateDowngrade pins this across every safe type.
+func asString(v any) (string, bool) {
+	if s, ok := v.(string); ok {
+		return s, true
+	}
+	rv := reflect.ValueOf(v)
+	if rv.IsValid() && rv.Kind() == reflect.String {
+		return rv.String(), true
+	}
+	return "", false
+}
+
 // toSlice converts any slice or array to []any. []any is cloned; other types are
 // expanded via reflection. The result is never nil, only ever empty, so that
 // every function built on it inherits that guarantee — see the note on empty
@@ -495,7 +525,7 @@ func Seq(args ...int) ([]int, error) {
 //	first []int{1, 2, 3} → 1
 //	first "café"         → "c"
 func First(v any) (any, error) {
-	if s, ok := v.(string); ok {
+	if s, ok := asString(v); ok {
 		r := []rune(s)
 		if len(r) == 0 {
 			return nil, errors.New("first: empty string")
@@ -517,7 +547,7 @@ func First(v any) (any, error) {
 //	last []int{1, 2, 3} → 3
 //	last "café"         → "é"
 func Last(v any) (any, error) {
-	if s, ok := v.(string); ok {
+	if s, ok := asString(v); ok {
 		r := []rune(s)
 		if len(r) == 0 {
 			return nil, errors.New("last: empty string")
@@ -544,7 +574,7 @@ func Last(v any) (any, error) {
 //	take "日本語" 2                → "日本"
 //	take "日本語" -1               → "語"
 func Take(v any, n int) (any, error) {
-	if s, ok := v.(string); ok {
+	if s, ok := asString(v); ok {
 		r := []rune(s)
 		if n >= 0 {
 			if n > len(r) {
@@ -581,7 +611,7 @@ func Take(v any, n int) (any, error) {
 //	drop "日本語" 1                → "本語"
 //	drop "日本語" -1               → "日本"
 func Drop(v any, n int) (any, error) {
-	if s, ok := v.(string); ok {
+	if s, ok := asString(v); ok {
 		r := []rune(s)
 		if n >= 0 {
 			if n > len(r) {
@@ -940,14 +970,19 @@ func In(v, val any) (bool, error) {
 	if v == nil {
 		return false, nil
 	}
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.String:
-		s, ok := val.(string)
+	// Strings go through asString rather than this function's own kind check, so
+	// that what counts as a string is defined in one place for in, first, last,
+	// take, and drop alike. The needle is read the same way as the haystack, so
+	// a named type works on either side of the search.
+	if s, ok := asString(v); ok {
+		sub, ok := asString(val)
 		if !ok {
 			return false, fmt.Errorf("in: string search requires string value, got %T", val)
 		}
-		return strings.Contains(rv.String(), s), nil
+		return strings.Contains(s, sub), nil
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
 	case reflect.Slice, reflect.Array:
 		// Iterate rather than going through toSlice: this is a read-only search
 		// that returns a bool, so there is no result to keep unaliased and no
