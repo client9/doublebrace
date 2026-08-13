@@ -1335,11 +1335,94 @@ func TestIn_mapKeyTypes(t *testing.T) {
 		{"string key against map[int]", map[int]string{1: "a"}, "1"},
 		{"int key against map[string]", map[string]any{"x": 1}, 1},
 		{"nil key", map[string]any{"x": 1}, nil},
+		{"struct key against map[string]", map[string]any{"x": 1}, struct{}{}},
 	} {
 		ok, err := In(c.m, c.val)
 		if err == nil {
 			t.Errorf("%s: expected an error, got %v", c.name, ok)
 		}
+	}
+}
+
+// A map key is reached on the same terms an element is. Requiring the needle to
+// be assignable to the key type made a map[Slug]int unsearchable — every other
+// map function converts to a named key type — and made in $m 1 fail on a
+// map[int64]any while the slice branch matched an int64 element with the same
+// literal. The width a number arrives as is an accident of the decoder, and a
+// key is no less subject to that than an element.
+func TestIn_mapKeyConversion(t *testing.T) {
+	type slug string
+
+	cases := []struct {
+		name string
+		m    any
+		val  any
+		want bool
+	}{
+		// A named key type, in both directions.
+		{"named key type, present", map[slug]int{"a": 1}, "a", true},
+		{"named key type, absent", map[slug]int{"a": 1}, "z", false},
+		{"named needle, plain key type", map[string]int{"a": 1}, slug("a"), true},
+		{"named needle, absent", map[string]int{"a": 1}, slug("z"), false},
+
+		// A number of one width against a key of another. The template literal
+		// is always an int, so this is every non-int keyed map.
+		{"int needle, int64 key", map[int64]string{1: "x"}, 1, true},
+		{"int needle, int64 key, absent", map[int64]string{1: "x"}, 2, false},
+		{"int needle, uint8 key", map[uint8]string{7: "x"}, 7, true},
+		{"int needle, float64 key", map[float64]string{1: "x"}, 1, true},
+		{"float needle, int64 key", map[int64]string{1: "x"}, 1.0, true},
+		{"int64 needle, int key", map[int]string{1: "x"}, int64(1), true},
+
+		// A needle no key of that type can hold is absent, not an error —
+		// exactly as it is for a slice of the same element type.
+		{"fractional needle, int64 key", map[int64]string{1: "x"}, 1.5, false},
+		{"out of range needle, uint8 key", map[uint8]string{7: "x"}, 300, false},
+		{"negative needle, uint64 key", map[uint64]string{1: "x"}, -1, false},
+		{"huge float needle, int64 key", map[int64]string{1: "x"}, 1e300, false},
+		{"NaN needle, float64 key", map[float64]string{1: "x"}, math.NaN(), false},
+
+		// Unchanged: an interface key type takes anything.
+		{"any key type", map[any]int{"a": 1}, "a", true},
+		{"bool key type", map[bool]int{true: 1}, true, true},
+	}
+	for _, c := range cases {
+		got, err := In(c.m, c.val)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s: In(%v, %#v) = %v, want %v", c.name, c.m, c.val, got, c.want)
+		}
+	}
+}
+
+// The map and slice branches must agree: a needle that finds an element of a
+// []T must find the matching key of a map[T]any, and one that misses must miss.
+// They reached numbers by different rules before, and the map side was the
+// stricter of the two.
+func TestIn_mapAndSliceAgreeOnNumbers(t *testing.T) {
+	for _, val := range []any{1, int64(1), 1.0, uint8(1), 2, 1.5, -1, math.NaN()} {
+		inSlice, sliceErr := In([]int64{1}, val)
+		inMap, mapErr := In(map[int64]string{1: "x"}, val)
+		if sliceErr != nil || mapErr != nil {
+			t.Errorf("%#v: slice err %v, map err %v", val, sliceErr, mapErr)
+			continue
+		}
+		if inSlice != inMap {
+			t.Errorf("%#v: slice says %v, map says %v", val, inSlice, inMap)
+		}
+	}
+}
+
+// An int converts to a string in Go, yielding the rune with that code point, so
+// a conversion rule written as reflect's ConvertibleTo would turn a search for
+// 65 into a search for "A". Kinds have to match before anything is converted.
+func TestIn_mapKeyDoesNotConvertIntToString(t *testing.T) {
+	m := map[string]int{"A": 1}
+	if _, err := In(m, 65); err == nil {
+		t.Error("In(map[string]int, 65): expected a type error, got a search for \"A\"")
 	}
 }
 

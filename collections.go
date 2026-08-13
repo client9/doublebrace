@@ -237,6 +237,23 @@ type number struct {
 	f    float64
 }
 
+// numKindOf classifies a reflect kind, and is the single definition of which
+// kinds are numeric — the counterpart to isSequence and asString. Everything
+// that asks the question goes through here or through asNumber, so a type
+// cannot be a number to one function and text to the next, which is the way
+// inferSortMode once came to sort a []Weight lexicographically.
+func numKindOf(k reflect.Kind) numKind {
+	switch k {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return numInt
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return numUint
+	case reflect.Float32, reflect.Float64:
+		return numFloat
+	}
+	return notNumeric
+}
+
 // asNumber classifies v by reflect kind, so named types (type Weight int) and
 // every integer and float width are recognized. Strings are deliberately not
 // numeric here: a "1" in the data should not match a 1 in the template, however
@@ -246,12 +263,12 @@ func asNumber(v any) number {
 	if !rv.IsValid() {
 		return number{}
 	}
-	switch rv.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	switch numKindOf(rv.Kind()) {
+	case numInt:
 		return number{kind: numInt, i: rv.Int()}
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case numUint:
 		return number{kind: numUint, u: rv.Uint()}
-	case reflect.Float32, reflect.Float64:
+	case numFloat:
 		return number{kind: numFloat, f: rv.Float()}
 	}
 	return number{}
@@ -1059,12 +1076,56 @@ func MergeMaps(mapsIn ...any) (map[string]any, error) {
 
 // --- general ---
 
+// mapKey converts val into a value usable as a key of a map whose key type is
+// kt. The second result reports whether val can name a key of that type at all;
+// false with no error means the search can only come up empty.
+//
+// Assignability alone is too strict to be the rule. It is what made a
+// map[Slug]int unsearchable — keys, values, merge, and fieldValue all reach a
+// named key type by converting — and what made in $m 1 fail on a map[int64]any
+// while in $list 1 matched an int64 element two lines away. The reason numbers
+// compare across types in the first place is that the type a number arrives as
+// is an accident of the decoder, and a map key is no less subject to that than
+// an element.
+//
+// Conversion is gated on the kinds rather than on reflect's ConvertibleTo, which
+// is far too permissive here: int converts to string in Go, so a
+// ConvertibleTo-based rule would quietly turn in $stringMap 65 into a search for
+// "A". Only string kind into string kind, and numeric into numeric, are allowed.
+//
+// A numeric conversion must also round-trip. Converting 1.5 to an int64 key
+// truncates, and converting 1e300 is implementation-defined, so either would
+// name some unrelated key; the result is checked against the original with the
+// same number.equal the slice branch uses. A needle that does not survive the
+// trip is absent rather than an error, because in $int64List 1.5 is likewise
+// false rather than a failure.
+func mapKey(kt reflect.Type, val any) (reflect.Value, bool, error) {
+	kv := reflect.ValueOf(val)
+	if !kv.IsValid() {
+		return reflect.Value{}, false, fmt.Errorf("in: map key search requires %s, got %T", kt, val)
+	}
+	if kv.Type().AssignableTo(kt) {
+		return kv, true, nil
+	}
+	numeric := numKindOf(kv.Kind()) != notNumeric && numKindOf(kt.Kind()) != notNumeric
+	stringly := kv.Kind() == reflect.String && kt.Kind() == reflect.String
+	if numeric || stringly {
+		converted := kv.Convert(kt)
+		if numeric && !asNumber(converted.Interface()).equal(asNumber(val)) {
+			return reflect.Value{}, false, nil
+		}
+		return converted, true, nil
+	}
+	return reflect.Value{}, false, fmt.Errorf("in: map key search requires %s, got %T", kt, val)
+}
+
 // In reports whether val is present in v.
 //
 //   - slice or array: element membership; numbers compare by value across
 //     types, everything else via reflect.DeepEqual
 //
-//   - map: key existence (val must be assignable to the map's key type)
+//   - map: key existence; a named key type and a number of any width match,
+//     on the same terms elements do
 //
 //   - string: substring search (val must be string)
 //
@@ -1110,12 +1171,14 @@ func In(v, val any) (bool, error) {
 		return false, nil
 	case reflect.Map:
 		// reflect.Value.MapIndex panics if val is not assignable to the map's
-		// key type, so check before indexing. Any key type is supported, not
-		// just string: in $m 1 works on a map[int]any.
-		kt := rv.Type().Key()
-		kv := reflect.ValueOf(val)
-		if !kv.IsValid() || !kv.Type().AssignableTo(kt) {
-			return false, fmt.Errorf("in: map key search requires %s, got %T", kt, val)
+		// key type, so the key is built before indexing. Any key type is
+		// supported, not just string: in $m 1 works on a map[int]any.
+		kv, ok, err := mapKey(rv.Type().Key(), val)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
 		}
 		return rv.MapIndex(kv).IsValid(), nil
 	default:
