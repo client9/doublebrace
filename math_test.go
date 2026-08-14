@@ -298,6 +298,61 @@ func TestMinMax_arrays(t *testing.T) {
 	}
 }
 
+// nestSlices returns depth nested slices wrapped around v: nestSlices(1, 42) is
+// []any{42}, nestSlices(2, 42) is []any{[]any{42}}.
+func nestSlices(depth int, v any) any {
+	out := v
+	for range depth {
+		out = []any{out}
+	}
+	return out
+}
+
+// Descending into a sequence that contains itself used to run until the stack
+// gave out. That is a fatal error rather than a panic, so it was not something
+// text/template's recover — or anything else — could turn back into an
+// execution error: the process ended. The test is that an error arrives at all.
+//
+// It cannot be written as "the old code fails here", because the old code takes
+// the test binary down with it rather than failing.
+func TestMinMax_selfReferentialSlice(t *testing.T) {
+	a := make([]any, 1)
+	a[0] = a
+	if _, err := Min(a); err == nil {
+		t.Error("Min(self-referential slice): expected an error")
+	}
+	if _, err := Max(a); err == nil {
+		t.Error("Max(self-referential slice): expected an error")
+	}
+
+	// A cycle through an outer sequence is the same shape one level up.
+	outer := make([]any, 1)
+	inner := []any{outer}
+	outer[0] = inner
+	if _, err := Min(outer); err == nil {
+		t.Error("Min(mutually referential slices): expected an error")
+	}
+}
+
+// The limit counts sequences entered, so a scalar argument sits at depth 0 and
+// maxFlattenDepth nested slices are the deepest that still flatten. Pinning both
+// sides is what keeps the bound from drifting off by one.
+func TestMinMax_nestingDepthBoundary(t *testing.T) {
+	got, err := Min(nestSlices(maxFlattenDepth, 42))
+	if err != nil {
+		t.Errorf("Min at the depth limit: unexpected error: %v", err)
+	} else if got != 42 {
+		t.Errorf("Min at the depth limit = %v, want 42", got)
+	}
+	if _, err := Min(nestSlices(maxFlattenDepth+1, 42)); err == nil {
+		t.Error("Min one level past the depth limit: expected an error")
+	}
+	// Ordinary nesting is nowhere near the bound and keeps working.
+	if got, err := Max([]any{[]any{1, []any{9, 2}}, 3}); err != nil || got != 9 {
+		t.Errorf("Max on ordinary nesting = %v, %v; want 9, nil", got, err)
+	}
+}
+
 func TestMinMax_errors(t *testing.T) {
 	if _, err := Min(); err == nil {
 		t.Error("Min(): expected error for no args")

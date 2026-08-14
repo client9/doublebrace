@@ -161,8 +161,40 @@ func ModBool(a, b any) (bool, error) {
 	return math.Mod(x, y) == 0, nil
 }
 
-// flattenNumbers recursively flattens args, expanding any slice or array values,
-// and converts each element to float64. Nesting is fully unwound.
+// maxFlattenDepth bounds how deeply min and max descend into nested sequences.
+// It is the guardrail MaxSeqLen and MaxRepeatLen are, for the one input that
+// reaches this package as a shape rather than as a count: a sequence that
+// contains itself.
+//
+//	a := make([]any, 1)
+//	a[0] = a
+//
+// The descent had no bound, and what it produced was not an error. It recursed
+// until the goroutine stack gave out, and a Go stack overflow is a fatal error
+// rather than a panic — text/template's recover cannot turn it into an
+// execution error, and nothing else can catch it either. It ends the process,
+// which in the server this package is written for takes every other request in
+// flight with it.
+//
+// Only Go data can be that shape; template syntax has no way to build a cycle.
+// That is what makes 100 generous rather than restrictive: nesting in real
+// template data runs two or three deep, and list (list ...) has to be typed out
+// a level at a time.
+//
+// Unlike the other two limits this one is unexported. Those bound a result a
+// legitimate template can approach, so an author needs the number to write
+// against; this bounds a shape no correct input has, so there is nothing to
+// tune. A caller who hits it has a cycle, not a large document.
+//
+// The fmt.Sprint in Sort's lexicographic mode is the same descent and is
+// deliberately left alone: fmt overflows on a cyclic value on its own, so a
+// bare {{ . }} with no functions registered already ends the process the same
+// way. That is a property of rendering such a value at all, not something this
+// package introduces or can meaningfully guard.
+const maxFlattenDepth = 100
+
+// flattenNumbers flattens args, expanding any slice or array values, and
+// converts each element to float64. Nesting is unwound to maxFlattenDepth.
 //
 // isSequence lives in collections.go but is the package-wide definition of an
 // indexable sequence; using it here is what keeps min and max accepting the same
@@ -170,21 +202,37 @@ func ModBool(a, b any) (bool, error) {
 func flattenNumbers(args []any) ([]float64, error) {
 	var out []float64
 	for _, arg := range args {
-		v := reflect.ValueOf(arg)
-		if v.IsValid() && isSequence(v.Kind()) {
-			for i := range v.Len() {
-				sub, err := flattenNumbers([]any{v.Index(i).Interface()})
-				if err != nil {
-					return nil, err
-				}
-				out = append(out, sub...)
-			}
-		} else {
-			f, err := toFloat64(arg)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, f)
+		var err error
+		if out, err = appendNumber(out, arg, 0); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// appendNumber appends arg to out, expanding a sequence element by element.
+// depth counts the sequences entered so far, so a scalar argument is at 0.
+//
+// Recursing on one value rather than on a []any holding it is what lets the
+// result accumulate into a single slice. The version that called flattenNumbers
+// back allocated a one-element []any and a fresh []float64 for every element at
+// every level, then copied each one into its parent.
+func appendNumber(out []float64, arg any, depth int) ([]float64, error) {
+	v := reflect.ValueOf(arg)
+	if !v.IsValid() || !isSequence(v.Kind()) {
+		f, err := toFloat64(arg)
+		if err != nil {
+			return nil, err
+		}
+		return append(out, f), nil
+	}
+	if depth >= maxFlattenDepth {
+		return nil, fmt.Errorf("nested sequences exceed the depth limit of %d", maxFlattenDepth)
+	}
+	for i := range v.Len() {
+		var err error
+		if out, err = appendNumber(out, v.Index(i).Interface(), depth+1); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
