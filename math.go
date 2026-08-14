@@ -196,7 +196,7 @@ const maxFlattenDepth = 100
 // flattenNumbers flattens args, expanding any slice or array values, and
 // converts each element to float64. Nesting is unwound to maxFlattenDepth.
 //
-// isSequence lives in collections.go but is the package-wide definition of an
+// isSequence lives in values.go but is the package-wide definition of an
 // indexable sequence; using it here is what keeps min and max accepting the same
 // inputs the collection functions do.
 func flattenNumbers(args []any) ([]float64, error) {
