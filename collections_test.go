@@ -1690,7 +1690,10 @@ func TestIn_mapKeyTypes(t *testing.T) {
 		t.Errorf("in map[int]string missing key: expected false, got %v %v", ok, err)
 	}
 
-	// Mismatched key types are an error, not a panic.
+	// A needle of a kind the key type cannot hold is absent, not an error and
+	// not a panic. It used to be an error, which made in $m nil fail a render
+	// that in $list nil answered false — the same needle, the same nothing
+	// found, reported two ways depending on the container.
 	for _, c := range []struct {
 		name string
 		m    any
@@ -1699,11 +1702,36 @@ func TestIn_mapKeyTypes(t *testing.T) {
 		{"string key against map[int]", map[int]string{1: "a"}, "1"},
 		{"int key against map[string]", map[string]any{"x": 1}, 1},
 		{"nil key", map[string]any{"x": 1}, nil},
+		{"nil key, interface key type", map[any]int{"x": 1}, nil},
 		{"struct key against map[string]", map[string]any{"x": 1}, struct{}{}},
+		{"bool key against map[string]", map[string]any{"x": 1}, true},
+		{"slice needle against map[string]", map[string]any{"x": 1}, []any{"x"}},
 	} {
-		ok, err := In(c.m, c.val)
-		if err == nil {
-			t.Errorf("%s: expected an error, got %v", c.name, ok)
+		got, err := In(c.m, c.val)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if got {
+			t.Errorf("%s: In(%v, %#v) = true, want false", c.name, c.m, c.val)
+		}
+	}
+}
+
+// The map and slice branches answer the same way for a needle neither can hold.
+// This is the general form of TestIn_mapAndSliceAgreeOnNumbers: the agreement is
+// not about numbers, it is that a container reports what it holds and nothing
+// about the needle's type.
+func TestIn_mapAndSliceAgreeOnForeignNeedles(t *testing.T) {
+	for _, val := range []any{nil, struct{}{}, true, 1, []any{"x"}, map[string]any{}} {
+		inSlice, sliceErr := In([]string{"x"}, val)
+		inMap, mapErr := In(map[string]any{"x": 1}, val)
+		if sliceErr != nil || mapErr != nil {
+			t.Errorf("%#v: slice err %v, map err %v", val, sliceErr, mapErr)
+			continue
+		}
+		if inSlice != inMap {
+			t.Errorf("%#v: slice says %v, map says %v", val, inSlice, inMap)
 		}
 	}
 }
@@ -1783,10 +1811,18 @@ func TestIn_mapAndSliceAgreeOnNumbers(t *testing.T) {
 // An int converts to a string in Go, yielding the rune with that code point, so
 // a conversion rule written as reflect's ConvertibleTo would turn a search for
 // 65 into a search for "A". Kinds have to match before anything is converted.
+//
+// The wrong answer this guards against is now true rather than an error, which
+// makes the assertion the sharper one: the search must come up empty against a
+// map that does hold "A".
 func TestIn_mapKeyDoesNotConvertIntToString(t *testing.T) {
 	m := map[string]int{"A": 1}
-	if _, err := In(m, 65); err == nil {
-		t.Error("In(map[string]int, 65): expected a type error, got a search for \"A\"")
+	got, err := In(m, 65)
+	if err != nil {
+		t.Fatalf("In(map[string]int, 65): unexpected error: %v", err)
+	}
+	if got {
+		t.Error(`In(map[string]int{"A": 1}, 65) = true: 65 was converted to "A"`)
 	}
 }
 

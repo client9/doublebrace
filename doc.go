@@ -286,4 +286,13 @@
 //   - in(v, val) bool — membership test: slice/array (element), map (key existence), string (substring); numbers compare by value across types and strings across string kinds
 //   - default(def, val) any — return val if non-zero, else def; zero: nil, false, 0, "", empty slice/map, all-zero array/struct (including a zero time.Time)
 //   - cond(ctrl, a, b) any — ternary: return a if ctrl is truthy, else b
+//
+// in answers false for a needle the container could not hold, rather than
+// failing: in $m nil and in $list nil are both false, whatever the map's key
+// type, and so is a search of a map[string]any for an int. A container reports
+// what it holds, and says nothing about the type of what was looked for.
+//
+// A string haystack is the one exception, because it is not a container of
+// values: in $title 42 is an error, since a substring search for a number has no
+// answer to give rather than a false one.
 package doublebrace

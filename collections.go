@@ -1256,7 +1256,21 @@ func MergeMaps(mapsIn ...any) (map[string]any, error) {
 
 // mapKey converts val into a value usable as a key of a map whose key type is
 // kt. The second result reports whether val can name a key of that type at all;
-// false with no error means the search can only come up empty.
+// false means the search can only come up empty.
+//
+// It cannot fail, which is the whole of the rule it follows: a needle no key of
+// this type could hold is absent, never an error. A nil, a struct against a
+// string key, an int against a string key — each used to be reported as a type
+// error, while the slice branch answered false for the same needle against the
+// same element type. in $m nil failed the render where in $list nil returned
+// false two lines away, and neither one had found anything. The haystack asks
+// the question; the needle only answers it.
+//
+// The case for erroring was that a needle of unrelated kind is likely a typo.
+// That is true of the slice branch equally, and it is not the trade this package
+// makes there — nor could it be, since a []any legitimately holds mixed types.
+// One rule, applied to both, beats a diagnostic that only half the containers
+// offer.
 //
 // Assignability alone is too strict to be the rule. It is what made a
 // map[Slug]int unsearchable — keys, values, merge, and fieldValue all reach a
@@ -1277,24 +1291,26 @@ func MergeMaps(mapsIn ...any) (map[string]any, error) {
 // same number.equal the slice branch uses. A needle that does not survive the
 // trip is absent rather than an error, because in $int64List 1.5 is likewise
 // false rather than a failure.
-func mapKey(kt reflect.Type, val any) (reflect.Value, bool, error) {
+func mapKey(kt reflect.Type, val any) (reflect.Value, bool) {
 	kv := reflect.ValueOf(val)
 	if !kv.IsValid() {
-		return reflect.Value{}, false, fmt.Errorf("in: map key search requires %s, got %T", kt, val)
+		// An untyped nil. No map has a key it could name, including one with an
+		// interface key type: a nil interface is not a valid key value.
+		return reflect.Value{}, false
 	}
 	if kv.Type().AssignableTo(kt) {
-		return kv, true, nil
+		return kv, true
 	}
 	numeric := numKindOf(kv.Kind()) != notNumeric && numKindOf(kt.Kind()) != notNumeric
 	stringly := kv.Kind() == reflect.String && kt.Kind() == reflect.String
 	if numeric || stringly {
 		converted := kv.Convert(kt)
 		if numeric && !asNumber(converted.Interface()).equal(asNumber(val)) {
-			return reflect.Value{}, false, nil
+			return reflect.Value{}, false
 		}
-		return converted, true, nil
+		return converted, true
 	}
-	return reflect.Value{}, false, fmt.Errorf("in: map key search requires %s, got %T", kt, val)
+	return reflect.Value{}, false
 }
 
 // In reports whether val is present in v.
@@ -1304,9 +1320,12 @@ func mapKey(kt reflect.Type, val any) (reflect.Value, bool, error) {
 //     reflect.DeepEqual
 //
 //   - map: key existence; a named key type and a number of any width match,
-//     on the same terms elements do
+//     on the same terms elements do. A needle that could not name a key of that
+//     type — a nil, a struct, an int against string keys — is absent rather than
+//     an error, exactly as it is for a slice
 //
-//   - string: substring search (val must be string)
+//   - string: substring search; val must be a string, and is the one needle
+//     reported as an error rather than as a miss
 //
 //     in (list "a" "b" "c") "b"          → true
 //     in (dict "x" 1) "x"                → true
@@ -1319,6 +1338,14 @@ func In(v, val any) (bool, error) {
 	// that what counts as a string is defined in one place for in, first, last,
 	// take, and drop alike. The needle is read the same way as the haystack, so
 	// a named type works on either side of the search.
+	//
+	// This is the one branch that reports a needle of the wrong shape as an
+	// error, and the exception is deliberate. A slice and a map are containers
+	// of values, so a needle they cannot hold is one they do not hold; a string
+	// is not a container of values at all, and "is 42 inside this text" has no
+	// answer to return rather than a false one. Coercing the needle is the only
+	// way to give it one, and that answer would be worse than the error: it
+	// would make in "a42b" 42 true.
 	if s, ok := asString(v); ok {
 		sub, ok := asString(val)
 		if !ok {
@@ -1351,11 +1378,10 @@ func In(v, val any) (bool, error) {
 	case reflect.Map:
 		// reflect.Value.MapIndex panics if val is not assignable to the map's
 		// key type, so the key is built before indexing. Any key type is
-		// supported, not just string: in $m 1 works on a map[int]any.
-		kv, ok, err := mapKey(rv.Type().Key(), val)
-		if err != nil {
-			return false, err
-		}
+		// supported, not just string: in $m 1 works on a map[int]any. A needle
+		// that cannot name a key of that type is absent, exactly as it is for a
+		// slice of the same element type — see mapKey.
+		kv, ok := mapKey(rv.Type().Key(), val)
 		if !ok {
 			return false, nil
 		}
