@@ -536,10 +536,10 @@ func isZero(v any) bool {
 	if isNilValue(v) {
 		return true
 	}
-	rv := reflect.ValueOf(v)
 	if z, ok := v.(interface{ IsZero() bool }); ok {
 		return z.IsZero()
 	}
+	rv := reflect.ValueOf(v)
 	if k := rv.Kind(); k == reflect.Slice || k == reflect.Map {
 		return rv.Len() == 0
 	}
@@ -849,8 +849,17 @@ func Compact(v any) ([]any, error) {
 func Concat(ins ...any) ([]any, error) {
 	// Validate and measure every argument before allocating, so that a bad
 	// argument fails without having built anything and out can be sized exactly.
+	//
+	// A []any needs neither: it is a sequence by its type, so there is nothing to
+	// check and len answers what reflect would. Taking it first here as well as
+	// in the copy below is what keeps the ordinary case — every collection
+	// function in this package returns []any — off reflect entirely.
 	total := 0
 	for i, v := range ins {
+		if s, ok := v.([]any); ok {
+			total += len(s)
+			continue
+		}
 		rv := reflect.ValueOf(v)
 		if !rv.IsValid() || !isSequence(rv.Kind()) {
 			return nil, fmt.Errorf("concat: argument %d: expected slice or array, got %T", i, v)
