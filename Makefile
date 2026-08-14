@@ -42,6 +42,10 @@ lint: ## lint and verify repo is already formatted
 	test -z "$$(gofmt -l *.go)"
 	golangci-lint run .
 
+.PHONY: vulncheck
+vulncheck: ## scan the module and stdlib for known vulnerabilities (downloads govulncheck and its database over the network)
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
 .PHONY: build
 build: ## build
 	go build ./...
