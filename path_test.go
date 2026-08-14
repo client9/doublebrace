@@ -4,14 +4,14 @@ import (
 	"testing"
 )
 
+// The exported functions are called directly rather than pulled out of the
+// FuncMap and asserted to a signature. The registered entries take any, since
+// they go through the strFn adapters that accept every string kind, so a type
+// assertion here would only pin how they are registered — which is what
+// TestStringArgs_acceptStringKinds checks, through a template, where it matters.
 func TestPathFuncs(t *testing.T) {
-	fm := FuncMap()
-
-	base := fm["pathBase"].(func(string) string)
-	dir := fm["pathDir"].(func(string) string)
-	ext := fm["pathExt"].(func(string) string)
-	join := fm["pathJoin"].(func(...string) string)
-	clean := fm["pathClean"].(func(string) string)
+	base, dir, ext := PathBase, PathDir, PathExt
+	join, clean := PathJoin, PathClean
 
 	cases := []struct {
 		name string
