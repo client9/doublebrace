@@ -8,8 +8,11 @@ import (
 
 func timeFuncMap() template.FuncMap {
 	return template.FuncMap{
-		"now":       Now,
-		"parseTime": ParseTime,
+		"now": Now,
+		// Both arguments are text, so both go through the adapter that defines
+		// what text is — see strings.go. A layout is routinely held in a config
+		// struct as a named type, and the value being parsed comes from data.
+		"parseTime": strFn2Err("parseTime", ParseTime),
 	}
 }
 

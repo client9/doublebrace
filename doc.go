@@ -59,10 +59,18 @@
 //
 // Wherever a function takes text it accepts any value of string kind: a plain
 // string, a named type (type Slug string), or an html/template typed value.
-// This holds for every string argument in the FuncMap — the functions above,
-// urlEncode and urlPathEscape, and first, last, take, drop, and in, which treat
-// a string as a sequence of runes. A function is never picky about a type its
-// neighbour accepts.
+// This holds for every string argument in the FuncMap — the functions above;
+// urlEncode and urlPathEscape; the path functions and parseTime's layout; the
+// keys of dict; and first, last, take, drop, and in, which treat a string as a
+// sequence of runes. A function is never picky about a type its neighbour
+// accepts.
+//
+// Equality follows the same rule, so a named type matches the literal it was
+// written from: where, in, and compact compare strings by their text across
+// string kinds, as they already compare numbers by value across numeric types.
+// The reason is the same in both cases — the type a value arrives as is an
+// accident of the decoder or the declaration, and a filter that quietly returns
+// nothing is indistinguishable from data that did not match.
 //
 // The result is always a plain string, never the input's own type. For an
 // html/template value that is a security property rather than a detail:
@@ -226,11 +234,11 @@
 // # Collections — Sequence Transformation
 //
 //   - reverse(v) []any — new slice in reverse order
-//   - compact(v) []any — remove consecutive duplicate elements; numbers compare by value across types; for full dedup: compact (sort $list)
+//   - compact(v) []any — remove consecutive duplicate elements; numbers compare by value across types and strings across string kinds; for full dedup: compact (sort $list)
 //   - concat(slices...) []any — concatenate multiple slices into one
 //   - sort(v [, key]) []any — type-aware sort: numeric types sort numerically, time.Time sorts chronologically, everything else sorts lexicographically; for []any the first element determines mode; key names a field on each element (always lexicographic)
 //   - sortNum(v [, key]) []any — numeric sort, including numeric strings; key names a field on each element
-//   - where(v, key, val) []any — filter a slice by field equality; numbers compare by value across types; a missing field is an error
+//   - where(v, key, val) []any — filter a slice by field equality; numbers compare by value across types and strings across string kinds; a missing field is an error
 //
 // sort and sortNum reject a nil element, and a nil value under key, in every
 // mode — a typed nil such as a (*Page)(nil) included. A nil has no position
@@ -275,7 +283,7 @@
 //
 // # Collections — General
 //
-//   - in(v, val) bool — membership test: slice/array (element), map (key existence), string (substring); numbers compare by value across types
+//   - in(v, val) bool — membership test: slice/array (element), map (key existence), string (substring); numbers compare by value across types and strings across string kinds
 //   - default(def, val) any — return val if non-zero, else def; zero: nil, false, 0, "", empty slice/map, all-zero array/struct (including a zero time.Time)
 //   - cond(ctrl, a, b) any — ternary: return a if ctrl is truthy, else b
 package doublebrace

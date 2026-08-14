@@ -5,13 +5,18 @@ import (
 	"text/template"
 )
 
+// Registered through the strFn adapters for the reason the string functions
+// are: a path in template data is as likely to be a named type (type Slug
+// string) or an html/template value as a plain string, and a function that
+// takes text should not be picky about a type its neighbour accepts. The
+// exported functions keep their string parameters — see strings.go.
 func pathFuncMap() template.FuncMap {
 	return template.FuncMap{
-		"pathBase":  PathBase,
-		"pathDir":   PathDir,
-		"pathExt":   PathExt,
-		"pathJoin":  PathJoin,
-		"pathClean": PathClean,
+		"pathBase":  strFn1("pathBase", PathBase),
+		"pathDir":   strFn1("pathDir", PathDir),
+		"pathExt":   strFn1("pathExt", PathExt),
+		"pathJoin":  strVarFn("pathJoin", PathJoin),
+		"pathClean": strFn1("pathClean", PathClean),
 	}
 }
 

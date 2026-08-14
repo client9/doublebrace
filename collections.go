@@ -466,8 +466,8 @@ func compareFloatUint64(f float64, u uint64) int {
 }
 
 // valuesEqual reports whether a and b are equal for filtering and membership
-// tests. Numbers compare by value across types; everything else falls back to
-// reflect.DeepEqual.
+// tests. Numbers compare by value across types, as do strings across string
+// kinds; everything else falls back to reflect.DeepEqual.
 //
 // Numeric comparison exists because the type a number arrives as is an accident
 // of the decoder: encoding/json produces float64, TOML int64, YAML int, and a
@@ -476,10 +476,30 @@ func compareFloatUint64(f float64, u uint64) int {
 // eq, which already unifies integer widths — and unlike eq, which reports an
 // int/float mismatch as an error, a filter that silently returns nothing looks
 // like data that legitimately did not match.
+//
+// String comparison is here for the same reason, reached from the other side.
+// DeepEqual is type-strict, so a named type never equalled the literal it was
+// written from: where $pages "Section" "blog" returned nothing at all when
+// Section was a type Section string, which is exactly the silent empty filter
+// the paragraph above rejects — and the missing-field check in Where exists to
+// prevent. It disagreed with the rest of the package too, since asString is what
+// decides whether a value is a string everywhere else, so in $slug "b" searched
+// a named string that in $slugs "b" could not find among them.
+//
+// The trade is the one already made for numbers: Slug("a") and "a" are equal
+// here though Go says otherwise. Equality is the only thing this decides — a
+// value's own type still survives the collection functions, so sorting a []Slug
+// yields Slug values, and the string functions downgrade for the separate
+// reason described on asString.
 func valuesEqual(a, b any) bool {
 	na, nb := asNumber(a), asNumber(b)
 	if na.kind != notNumeric && nb.kind != notNumeric {
 		return na.equal(nb)
+	}
+	if sa, ok := asString(a); ok {
+		if sb, ok := asString(b); ok {
+			return sa == sb
+		}
 	}
 	return reflect.DeepEqual(a, b)
 }
@@ -541,6 +561,12 @@ func List(elems ...any) []any {
 // Dict creates a map[string]any from alternating key-value arguments.
 // Returns an error if the argument count is odd or a key is not a string.
 //
+// A key may be any value of string kind, so a named type (type Slug string)
+// names a key — the rule asString sets and the rest of the package follows.
+// merge, keys, values, and the key forms of sort and where all reach a named key
+// type by converting, so a dict literal that could not take one was the one
+// place a Slug in hand could not be used as a key.
+//
 //	dict "name" "Alice" "age" 30 → map[string]any{"name": "Alice", "age": 30}
 func Dict(kvs ...any) (map[string]any, error) {
 	if len(kvs)%2 != 0 {
@@ -548,7 +574,7 @@ func Dict(kvs ...any) (map[string]any, error) {
 	}
 	m := make(map[string]any, len(kvs)/2)
 	for i := 0; i < len(kvs); i += 2 {
-		k, ok := kvs[i].(string)
+		k, ok := asString(kvs[i])
 		if !ok {
 			return nil, fmt.Errorf("dict: key at position %d must be string, got %T", i, kvs[i])
 		}
@@ -800,9 +826,12 @@ func Reverse(v any) ([]any, error) {
 // Elements compare with the same rule as where and in: numbers are equal when
 // their values are equal, whatever their types, so a 1 decoded as float64 and a
 // 1 written as an int literal are one duplicate rather than two elements.
+// Strings compare the same way across string kinds. The element kept is the one
+// that was there — only equality spans types, never the result.
 //
 //	compact []int{1, 1, 2, 3, 3, 1} → []any{1, 2, 3, 1}
 //	compact []any{1, 1.0, 2}        → []any{1, 2}
+//	compact []any{Slug("a"), "a"}   → []any{Slug("a")}
 func Compact(v any) ([]any, error) {
 	elems, err := toSlice(v)
 	if err != nil {
@@ -1054,12 +1083,13 @@ func SortNum(v any, key ...string) ([]any, error) {
 // as a []map[string]any decoded from JSON.
 //
 // Numbers compare by value regardless of type, so a field decoded from JSON as
-// float64 matches an integer literal. It is an error if any element cannot
-// supply the named field — a missing one would otherwise drop every element and
-// look like data that simply did not match.
+// float64 matches an integer literal, and strings compare by their text across
+// string kinds, so a field declared as a named type matches a plain literal. It
+// is an error if any element cannot supply the named field — a missing one would
+// otherwise drop every element and look like data that simply did not match.
 //
 //	where $pages "Draft" false    → pages where Draft == false
-//	where $pages "Section" "blog" → pages in the blog section
+//	where $pages "Section" "blog" → pages in the blog section, whether Section is string or a named type
 //	where $pages "Weight" 1       → matches whether Weight is int, int64, or float64
 func Where(v any, key string, val any) ([]any, error) {
 	elems, err := toSlice(v)
@@ -1270,7 +1300,8 @@ func mapKey(kt reflect.Type, val any) (reflect.Value, bool, error) {
 // In reports whether val is present in v.
 //
 //   - slice or array: element membership; numbers compare by value across
-//     types, everything else via reflect.DeepEqual
+//     types and strings by their text across string kinds, everything else via
+//     reflect.DeepEqual
 //
 //   - map: key existence; a named key type and a number of any width match,
 //     on the same terms elements do

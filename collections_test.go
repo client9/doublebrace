@@ -1930,6 +1930,76 @@ func TestValuesEqual_numericAcrossTypes(t *testing.T) {
 	}
 }
 
+// asString decides what a string is everywhere else in the package, so equality
+// reads one the same way. reflect.DeepEqual is type-strict, and while it held
+// this alone a named type never equalled the literal it was written from: the
+// filter came back empty, with no error, which is the outcome the missing-field
+// check in Where exists to prevent — reached through a field that is present.
+func TestValuesEqual_stringsAcrossKinds(t *testing.T) {
+	type Section string
+	cases := []struct {
+		a, b any
+		want bool
+	}{
+		{Section("blog"), "blog", true},
+		{"blog", Section("blog"), true},
+		{Section("blog"), Slug("blog"), true}, // two named types, same text
+		{Section("blog"), "docs", false},
+		{htmltemplate.HTML("<b>"), "<b>", true},
+		{"", Section(""), true},
+		// A string is still not a number, and not any other kind.
+		{Section("1"), 1, false},
+		{Section("true"), true, false},
+		{Section("x"), nil, false},
+		{Section("x"), []any{"x"}, false},
+	}
+	for _, c := range cases {
+		if got := valuesEqual(c.a, c.b); got != c.want {
+			t.Errorf("valuesEqual(%#v, %#v) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// The three functions built on valuesEqual, each of which returned a wrong
+// answer rather than an error while equality was type-strict.
+func TestWhereInCompact_stringsAcrossKinds(t *testing.T) {
+	type Section string
+
+	pages := []any{
+		map[string]any{"Title": "a", "Section": Section("blog")},
+		map[string]any{"Title": "b", "Section": Section("docs")},
+	}
+	got, err := Where(pages, "Section", "blog")
+	if err != nil {
+		t.Fatalf("Where: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("Where by a named-type field matched %d pages, want 1", len(got))
+	}
+
+	if in, err := In([]Section{"a", "b"}, "b"); err != nil || !in {
+		t.Errorf(`In([]Section{"a","b"}, "b") = %v, %v; want true, nil`, in, err)
+	}
+	if in, err := In([]any{"a"}, Section("a")); err != nil || !in {
+		t.Errorf(`In with a named-type needle = %v, %v; want true, nil`, in, err)
+	}
+
+	// A named type and a plain string holding the same text are one duplicate.
+	c, err := Compact([]any{Section("a"), "a", "b"})
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if len(c) != 2 {
+		t.Errorf("Compact(%v) kept %d elements, want 2", []any{Section("a"), "a", "b"}, len(c))
+	}
+	// Compact keeps the element, not a coerced copy of it: only equality is
+	// decided across kinds, and a value's own type survives every collection
+	// function.
+	if _, ok := c[0].(Section); !ok {
+		t.Errorf("Compact returned %T for the first element, want Section", c[0])
+	}
+}
+
 // Comparing must narrow the float to an integer, not widen the integer to a
 // float: float64 cannot represent every int64, so widening would report two
 // distinct IDs as equal.

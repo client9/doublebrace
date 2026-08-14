@@ -223,14 +223,33 @@ func TestStringArgs_acceptStringKinds(t *testing.T) {
 		{`{{ take .S 5 }}`, "hello"},
 		{`{{ drop .S 6 }}`, "world"},
 		{`{{ in .S .Pre }}`, "true"},
+		// Paths and layouts are text too. These registered their plain string
+		// parameters directly until the strFn adapters were extended to them,
+		// which made pathBase reject the value lower had just accepted.
+		{`{{ pathBase .Path }}`, "bar.html"},
+		{`{{ pathDir .Path }}`, "foo"},
+		{`{{ pathExt .Path }}`, ".html"},
+		{`{{ pathClean .Dirty }}`, "foo/bar.html"},
+		{`{{ pathJoin .Pre .Suf }}`, "hello/world"},
+		{`{{ (parseTime .Layout .Date).Year }}`, "2024"},
+		// A key is text as well, on either side of the lookup: the named type
+		// names an ordinary string key, which index then finds with a plain one.
+		{`{{ index (dict .Pre 1) "hello" }}`, "1"},
+		// Equality reads a string the same way, so a named type matches the
+		// literal it was written from rather than silently missing it.
+		{`{{ in (list .Pre) "hello" }}`, "true"},
 	}
 
 	data := map[string]any{
-		"S":   slug("hello world"),
-		"Pre": slug("hello"),
-		"Suf": slug("world"),
-		"Sp":  slug(" "),
-		"Pad": slug("  hi  "),
+		"S":      slug("hello world"),
+		"Pre":    slug("hello"),
+		"Suf":    slug("world"),
+		"Sp":     slug(" "),
+		"Pad":    slug("  hi  "),
+		"Path":   slug("foo/bar.html"),
+		"Dirty":  slug("foo/./bar.html"),
+		"Layout": slug("2006-01-02"),
+		"Date":   slug("2024-03-15"),
 	}
 	for _, c := range cases {
 		tmpl, err := template.New("t").Funcs(FuncMap()).Parse(c.src)
@@ -268,6 +287,13 @@ func TestStringArgs_rejectNonStrings(t *testing.T) {
 		`{{ repeat 42 2 }}`,
 		`{{ urlEncode 42 }}`,
 		`{{ lower .Nil }}`,
+		`{{ pathBase 42 }}`,
+		`{{ pathClean .Nil }}`,
+		// Every position of the variadic is checked, not just the first.
+		`{{ pathJoin "a" 42 }}`,
+		`{{ parseTime 42 "2024-03-15" }}`,
+		`{{ parseTime "2006-01-02" 42 }}`,
+		`{{ dict 42 "v" }}`,
 	} {
 		tmpl := template.Must(template.New("t").Funcs(FuncMap()).Parse(src))
 		var buf strings.Builder

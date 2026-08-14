@@ -33,6 +33,14 @@ import (
 // strings.ToLower, and doc.go names the stdlib function for each so a Go caller
 // knows what to call instead. Adapting is not aliasing — the adapter is
 // unexported and exists for the template, not for Go.
+//
+// The adapters live here but are not this file's alone: safe.go registers
+// urlEncode and urlPathEscape through them, path.go the five path functions, and
+// time.go parseTime. Registering a function that takes text any other way is
+// what reintroduces the split this exists to close — pathBase $slug failed with
+// "wrong type for value; expected string; got Slug" long after lower $slug
+// stopped, because path.go handed its plain string parameters to the FuncMap
+// directly.
 func stringFuncMap() template.FuncMap {
 	return template.FuncMap{
 		// Case
@@ -136,6 +144,44 @@ func strFn3[R any](name string, fn func(string, string, string) R) func(any, any
 			return zero, err
 		}
 		return fn(sa, sb, sc), nil
+	}
+}
+
+// strFn2Err is strFn2 for a function that reports its own error — parseTime,
+// whose second result is a parse failure rather than a type mismatch. The two
+// errors stay distinguishable because strArg names the function and fn already
+// does the same.
+func strFn2Err[R any](name string, fn func(string, string) (R, error)) func(any, any) (R, error) {
+	return func(a, b any) (R, error) {
+		var zero R
+		sa, err := strArg(name, a)
+		if err != nil {
+			return zero, err
+		}
+		sb, err := strArg(name, b)
+		if err != nil {
+			return zero, err
+		}
+		return fn(sa, sb)
+	}
+}
+
+// strVarFn adapts a variadic string function — pathJoin, the only one. The
+// argument index is named in the error because the arguments are otherwise
+// interchangeable: "pathJoin: expected a string, got int" leaves an author with
+// five candidates and no way to tell which one their data supplied.
+func strVarFn[R any](name string, fn func(...string) R) func(...any) (R, error) {
+	return func(args ...any) (R, error) {
+		ss := make([]string, len(args))
+		for i, a := range args {
+			s, err := strArg(fmt.Sprintf("%s: argument %d", name, i+1), a)
+			if err != nil {
+				var zero R
+				return zero, err
+			}
+			ss[i] = s
+		}
+		return fn(ss...), nil
 	}
 }
 
