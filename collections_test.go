@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	// Aliased because strings_test.go binds the name template to text/template;
 	// one identifier meaning two packages across one test package is a trap.
@@ -2088,4 +2089,107 @@ func TestCond(t *testing.T) {
 			t.Errorf("cond(%v) = %v, want %v", c.ctrl, got, c.want)
 		}
 	}
+}
+
+// --- fuzz ---
+
+// FuzzSeq targets seqSpan's uint64 arithmetic, added after seq(math.MinInt,
+// math.MaxInt) once wrapped in signed int and silently computed a span of 0 —
+// see the comment on seqSpan. This checks the invariants a correct result must
+// have: it starts at start, each element is exactly one step from the last,
+// it never overshoots end, and it never exceeds MaxSeqLen.
+func FuzzSeq(f *testing.F) {
+	f.Add(1, 10, 1)
+	f.Add(10, 1, -1)
+	f.Add(math.MinInt, math.MaxInt, 1)
+	f.Add(math.MaxInt, math.MinInt, -1)
+	f.Add(0, 0, 1)
+	f.Add(5, 5, -3)
+	f.Fuzz(func(t *testing.T, start, end, step int) {
+		got, err := Seq(start, end, step)
+		if step == 0 {
+			if err == nil {
+				t.Fatalf("Seq(%d, %d, 0) succeeded, want a zero-step error", start, end)
+			}
+			return
+		}
+		if err != nil {
+			return // a length-limit error is an acceptable outcome
+		}
+		if len(got) > MaxSeqLen {
+			t.Fatalf("Seq(%d, %d, %d) returned %d elements, want <= %d", start, end, step, len(got), MaxSeqLen)
+		}
+		nonEmptyRange := (step > 0 && start <= end) || (step < 0 && start >= end)
+		if len(got) == 0 {
+			if nonEmptyRange {
+				t.Fatalf("Seq(%d, %d, %d) returned no elements but the range is non-empty", start, end, step)
+			}
+			return
+		}
+		if !nonEmptyRange {
+			t.Fatalf("Seq(%d, %d, %d) returned %v, want no elements", start, end, step, got)
+		}
+		if got[0] != start {
+			t.Fatalf("Seq(%d, %d, %d)[0] = %d, want %d", start, end, step, got[0], start)
+		}
+		for i := 1; i < len(got); i++ {
+			if got[i] != got[i-1]+step {
+				t.Fatalf("Seq(%d, %d, %d)[%d] = %d, want %d", start, end, step, i, got[i], got[i-1]+step)
+			}
+		}
+		last := got[len(got)-1]
+		if step > 0 && last > end {
+			t.Fatalf("Seq(%d, %d, %d) overshot end: last = %d", start, end, step, last)
+		}
+		if step < 0 && last < end {
+			t.Fatalf("Seq(%d, %d, %d) undershot end: last = %d", start, end, step, last)
+		}
+	})
+}
+
+// FuzzTakeDrop_string checks the rune-slicing in Take and Drop by round trip
+// rather than by predicting a specific result: for n >= 0, Take returns the
+// first n runes and Drop the rest, so concatenating them reconstructs s; for
+// n < 0 the roles of the two halves swap. Any rune-boundary bug in either
+// function breaks this reconstruction or produces invalid UTF-8.
+func FuzzTakeDrop_string(f *testing.F) {
+	f.Add("hello", 3)
+	f.Add("hello", -3)
+	f.Add("日本語", 2)
+	f.Add("日本語", -2)
+	f.Add("", 5)
+	f.Add("x", 0)
+	f.Add("x", 1000000)
+	f.Add("x", -1000000)
+	f.Fuzz(func(t *testing.T, s string, n int) {
+		gotTake, errT := Take(s, n)
+		gotDrop, errD := Drop(s, n)
+		if errT != nil || errD != nil {
+			t.Fatalf("Take/Drop(%q, %d): unexpected error: take=%v drop=%v", s, n, errT, errD)
+		}
+		take, ok := gotTake.(string)
+		if !ok {
+			t.Fatalf("Take(%q, %d) returned %T, want string", s, n, gotTake)
+		}
+		drop, ok := gotDrop.(string)
+		if !ok {
+			t.Fatalf("Drop(%q, %d) returned %T, want string", s, n, gotDrop)
+		}
+		if !utf8.ValidString(s) {
+			// The reconstruction below assumes a rune round trip is lossless.
+			// It isn't for malformed input: []rune(s) replaces each invalid
+			// byte with U+FFFD, so take+drop can validly differ from s itself.
+			return
+		}
+		if !utf8.ValidString(take) || !utf8.ValidString(drop) {
+			t.Fatalf("Take/Drop(%q, %d) produced invalid UTF-8: take=%q drop=%q", s, n, take, drop)
+		}
+		recombined := take + drop
+		if n < 0 {
+			recombined = drop + take
+		}
+		if recombined != s {
+			t.Fatalf("Take/Drop(%q, %d): recombined = %q, want %q (take=%q drop=%q)", s, n, recombined, s, take, drop)
+		}
+	})
 }

@@ -62,6 +62,22 @@ test: ## test
 race: ## test under the race detector
 	go test -race -count=1 ./...
 
+## Each Fuzz* function is discovered by name rather than listed here, so a new
+## one added to a _test.go file is swept without anyone remembering to add it
+## in a second place — the rule the rest of the package follows for anything
+## that would otherwise need to be kept in sync by hand.
+##
+## go test only fuzzes one target per invocation — a -fuzz pattern matching
+## more than one is a hard error — hence the loop. -run=^$$ skips the regular
+## Test/Example suite on every iteration; make test already covers that.
+## FUZZTIME overrides the per-target budget, e.g. FUZZTIME=60s make fuzz.
+.PHONY: fuzz
+fuzz: ## fuzz every Fuzz target briefly (FUZZTIME=10s default; downloads nothing, but each target seeds from testdata/fuzz)
+	@for name in $$(grep -h '^func Fuzz' *_test.go | sed -E 's/^func (Fuzz[A-Za-z0-9_]*).*/\1/'); do \
+		echo "--- $$name ---"; \
+		go test -run=^$$ -fuzz="^$${name}$$" -fuzztime="$${FUZZTIME:-10s}" . || exit 1; \
+	done
+
 .PHONY: env
 env: ## mac osx environment
 	brew upgrade
@@ -70,4 +86,5 @@ env: ## mac osx environment
 .PHONY: clean
 clean: ## remove any generated files
 	rm -f *.out
+	rm -rf testdata
 	go clean -testcache

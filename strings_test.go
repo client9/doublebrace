@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"text/template"
+	"unicode/utf8"
 )
 
 func TestRepeat(t *testing.T) {
@@ -287,4 +288,102 @@ func TestTruncate(t *testing.T) {
 	if _, err := Truncate("hello", "eight"); err == nil {
 		t.Error("Truncate with a non-numeric length: expected an error")
 	}
+}
+
+// --- fuzz ---
+
+// FuzzRepeat targets the MaxRepeatLen/runes division guard, which exists so
+// that runes*count is checked for the limit without ever computing a product
+// that could itself overflow int. The fuzz target re-derives the same guard
+// independently and checks Repeat agrees with it in both directions: it must
+// error whenever the guard says the request is too large, and must not error
+// — and must produce exactly runes*n runes of valid UTF-8 — whenever it isn't.
+func FuzzRepeat(f *testing.F) {
+	f.Add("a", 3)
+	f.Add("", 5)
+	f.Add("日本語", 100)
+	f.Add("x", -1)
+	f.Add("x", 0)
+	f.Add("x", 100000000)
+	f.Add("", 100000000)
+	f.Fuzz(func(t *testing.T, s string, n int) {
+		got, err := Repeat(s, n)
+		if n < 0 {
+			if err == nil {
+				t.Fatalf("Repeat(%q, %d): want error for negative count, got %q", s, n, got)
+			}
+			return
+		}
+		runes := LenRunes(s)
+		withinLimit := runes == 0 || n <= MaxRepeatLen/runes
+		if err != nil {
+			if withinLimit {
+				t.Fatalf("Repeat(%q, %d): unexpected error within the %d-rune limit: %v", s, n, MaxRepeatLen, err)
+			}
+			return
+		}
+		if !withinLimit {
+			t.Fatalf("Repeat(%q, %d) succeeded but exceeds the %d-rune limit", s, n, MaxRepeatLen)
+		}
+		if !utf8.ValidString(s) {
+			// Repeat is a byte-level strings.Repeat, so it agrees with the
+			// MaxRepeatLen guard on malformed input too, but rune-counting
+			// isn't self-synchronizing across a repetition boundary there: a
+			// dangling lead byte at the end of one copy can combine with a
+			// stray continuation byte at the start of the next into a rune
+			// that spans the seam, so LenRunes(got) need not be runes*n and
+			// there is nothing further that can be checked.
+			return
+		}
+		if want := runes * n; LenRunes(got) != want {
+			t.Fatalf("Repeat(%q, %d) = %d runes, want %d", s, n, LenRunes(got), want)
+		}
+		if !utf8.ValidString(got) {
+			t.Fatalf("Repeat(%q, %d) produced invalid UTF-8: %q", s, n, got)
+		}
+	})
+}
+
+// FuzzTruncate checks the rune-count and ellipsis-suffix contract for every n,
+// including the n <= 0 and "already short enough" cases the table tests only
+// sample a few of, and that the result is always valid UTF-8 — a rune slice
+// boundary bug is exactly what would produce a truncated multi-byte character.
+func FuzzTruncate(f *testing.F) {
+	f.Add("hello world", 8)
+	f.Add("hi", 8)
+	f.Add("日本語", 2)
+	f.Add("", 5)
+	f.Add("x", 0)
+	f.Add("x", -1)
+	f.Add("x", 1)
+	f.Fuzz(func(t *testing.T, s string, n int) {
+		got, err := Truncate(s, n)
+		if err != nil {
+			t.Fatalf("Truncate(%q, %d): unexpected error: %v", s, n, err)
+		}
+		if utf8.ValidString(s) && !utf8.ValidString(got) {
+			// Only checked for well-formed input: []rune(s) on malformed UTF-8
+			// replaces each bad byte with U+FFFD, so the "unchanged" branch
+			// below can return s's own original, still-malformed bytes.
+			t.Fatalf("Truncate(%q, %d) produced invalid UTF-8: %q", s, n, got)
+		}
+		runes := LenRunes(s)
+		switch {
+		case n <= 0:
+			if got != "" {
+				t.Fatalf("Truncate(%q, %d) = %q, want empty", s, n, got)
+			}
+		case runes <= n:
+			if got != s {
+				t.Fatalf("Truncate(%q, %d) = %q, want unchanged input", s, n, got)
+			}
+		default:
+			if gotRunes := LenRunes(got); gotRunes != n {
+				t.Fatalf("Truncate(%q, %d) = %q (%d runes), want exactly %d", s, n, got, gotRunes, n)
+			}
+			if !strings.HasSuffix(got, "…") {
+				t.Fatalf("Truncate(%q, %d) = %q, want an ellipsis suffix", s, n, got)
+			}
+		}
+	})
 }

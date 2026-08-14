@@ -248,3 +248,97 @@ func TestToInt_int64OverflowGuardIs32BitOnly(t *testing.T) {
 		}
 	}
 }
+
+// --- fuzz ---
+
+// FuzzToInt_string targets intFromString, which tries strconv.Atoi first and
+// falls back to ParseFloat — the two-stage parse exists so a large exact
+// integer never loses precision by going through the float path, and this
+// checks that whichever stage accepts the string is the one whose answer
+// comes back.
+func FuzzToInt_string(f *testing.F) {
+	seeds := []string{
+		"0", "-0", "42", "-42", "3.9", "-3.9", "17", "",
+		"9223372036854775807", "9223372036854775808", "-9223372036854775808",
+		"1e300", "NaN", "Inf", "-Inf", "  12  ", "0x1A", "1_000", "+5",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		got, err := ToInt(s)
+		if err != nil {
+			return // an error is always an acceptable outcome
+		}
+		if i, aerr := strconv.Atoi(s); aerr == nil {
+			if got != i {
+				t.Fatalf("ToInt(%q) = %d, want %d (from strconv.Atoi)", s, got, i)
+			}
+			return
+		}
+		// Atoi rejected it, so the float fallback must have run: the result is
+		// only valid if ParseFloat also accepted the string.
+		fv, ferr := strconv.ParseFloat(s, 64)
+		if ferr != nil {
+			t.Fatalf("ToInt(%q) = %d, nil, but neither Atoi nor ParseFloat accepted %q", s, got, s)
+		}
+		if want := int(math.Trunc(fv)); got != want {
+			t.Fatalf("ToInt(%q) = %d, want %d (truncated from %v)", s, got, want, fv)
+		}
+	})
+}
+
+// FuzzToInt_float64 targets intFromFloat64's range check directly, which is
+// written as f >= -float64(math.MinInt) rather than f > float64(math.MaxInt)
+// specifically because the latter is not exact at every word size — see the
+// comment on intFromFloat64.
+func FuzzToInt_float64(f *testing.F) {
+	f.Add(0.0)
+	f.Add(3.9)
+	f.Add(-3.9)
+	f.Add(math.NaN())
+	f.Add(math.Inf(1))
+	f.Add(math.Inf(-1))
+	f.Add(float64(math.MaxInt64))
+	f.Add(float64(math.MinInt64))
+	f.Add(-float64(math.MinInt64)) // exactly one past int64's range
+	f.Fuzz(func(t *testing.T, x float64) {
+		got, err := ToInt(x)
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			if err == nil {
+				t.Fatalf("ToInt(%v) = %d, want an error", x, got)
+			}
+			return
+		}
+		if err != nil {
+			return // out of range is a legitimate error
+		}
+		// err == nil means x was in range, so truncating cannot lose anything
+		// beyond what Trunc already removes: the round trip must be exact.
+		if trunc := math.Trunc(x); float64(got) != trunc {
+			t.Fatalf("ToInt(%v) = %d, want %v", x, got, trunc)
+		}
+	})
+}
+
+// FuzzToFloat_string checks that ToFloat's string path is exactly
+// strconv.ParseFloat, as toFloat64's string case claims to be.
+func FuzzToFloat_string(f *testing.F) {
+	seeds := []string{"0", "3.14", "-3.14", "1e300", "NaN", "Inf", "-Inf", "", "  1  ", "1_000"}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		got, err := ToFloat(s)
+		want, werr := strconv.ParseFloat(s, 64)
+		if (err == nil) != (werr == nil) {
+			t.Fatalf("ToFloat(%q) error=%v, strconv.ParseFloat error=%v: disagree on acceptance", s, err, werr)
+		}
+		if err != nil {
+			return
+		}
+		if got != want && !(math.IsNaN(got) && math.IsNaN(want)) {
+			t.Fatalf("ToFloat(%q) = %v, want %v", s, got, want)
+		}
+	})
+}
