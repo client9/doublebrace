@@ -31,6 +31,8 @@ drop $list -2
 ```
 printf "%s and %s" (join (drop $list -1) ", ") (last $list)
 ```
+Needs two or more elements: a one-element list drops to empty and renders
+" and a", and an empty list is an error from `last`.
 
 **Add trailing separator**
 ```
@@ -63,12 +65,16 @@ printf "%v" $val
 ```
 outputs 0–9. Use `seq` for non-zero start or step: `{{ range (seq 3 7) }}`.
 
-**String Pad Right**
+**String Pad Left** (right-align in a 20-column field)
 ```
-{{ printf "%20s" $atr }}
+{{ printf "%20s" $str }}
 ```
 
-**String Pad Left**
+**String Pad Right** (left-align in a 20-column field)
 ```
-{{ printf "%-20s" $astr }}
+{{ printf "%-20s" $str }}
 ```
+
+Both pad to a minimum width and never truncate; use `truncate` for an upper
+bound. The width counts runes rather than bytes, so `"日本"` pads to the same
+column as `"ab"`.
