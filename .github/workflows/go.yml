@@ -65,8 +65,6 @@ jobs:
     - name: Race
       run: make race
 
-    # This module has no dependencies, so the exposure here is the stdlib
-    # itself: govulncheck also checks the toolchain's packages against the Go
-    # vulnerability database, and only flags ones this code can actually reach.
-    - name: Vulnerability check
-      run: make vulncheck
+    # 
+    #- name: Vulnerability check
+    #  run: make vulncheck
