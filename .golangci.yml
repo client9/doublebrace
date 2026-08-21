@@ -12,6 +12,15 @@ linters:
     # the cost of a parse. Keeps the errors.New sweep from regressing one call
     # at a time.
     - perfsprint
+    # Mirror of perfsprint above, for the other end of the errors.New sweep:
+    # this package wraps consistently with fmt.Errorf("...: %w", err), and
+    # errorlint is what catches a wrap silently losing its %w, or a caller
+    # comparing an error with == / a type assertion instead of errors.Is/As.
+    - errorlint
+    # Exported doc comments here are the package's whole surface on
+    # pkg.go.dev; a typo in one ships to readers, not just to us. Fast,
+    # auto-fixable, effectively no false positives.
+    - misspell
   exclusions:
     generated: lax
     presets:
@@ -31,6 +40,9 @@ linters:
       - builtin$
       - examples$
 formatters:
+  enable:
+    - gofmt
+    - goimports
   exclusions:
     generated: lax
     paths:
